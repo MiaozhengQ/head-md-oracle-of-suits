@@ -9,6 +9,6 @@ function windowResized() {
 
 function draw() {
   background(220);
-  circle(width / 2, height / 2, width*0.9);
-
+  circle(width / 2, height / 2, frameCount * 0.2);
+print(frameCount);
 }
