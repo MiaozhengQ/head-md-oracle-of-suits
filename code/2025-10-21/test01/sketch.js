@@ -31,6 +31,6 @@ y1 += random(-1,1);
 function mousePressed() {
   x = mouseX;
   y = mouseY;
-  x1 = mouseX + random(-1,1);
-  y1 = mouseY + random(-1,1);
+  x1 = mouseX + random(-10,10);
+  y1 = mouseY + random(-10,10);
 }
