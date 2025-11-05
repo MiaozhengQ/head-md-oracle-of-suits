@@ -1,7 +1,11 @@
 let capture;
 let pose;
 let latestLandmarks = null;
-
+let headImage;
+function preload() {
+  // load the head image (place head.png in an 'assets' folder next to sketch.js)
+  headImage = loadImage('assets/head.png');
+}
 function setup() {
   createCanvas(windowWidth, windowHeight);
 
@@ -117,13 +121,22 @@ function drawAvatar(landmarks, gesture) {
 
   // draw head using shoulder width to estimate size
   if (nose && lShoulder && rShoulder) {
-    const headRadius = p5.Vector.dist(lShoulder, rShoulder) * 0.6;
-    fill(240);
-    circle(nose.x, nose.y - headRadius * 0.6, headRadius * 2);
-    // simple eyes
-    fill(30);
-    circle(nose.x - headRadius * 0.3, nose.y - headRadius * 0.7, headRadius * 0.18);
-    circle(nose.x + headRadius * 0.3, nose.y - headRadius * 0.7, headRadius * 0.18);
+    // Increase size and move image down a bit. Tune these multipliers as needed.
+    const shoulderDist = p5.Vector.dist(lShoulder, rShoulder);
+    const headRadius = shoulderDist * 0.9;       // was 0.6, larger head
+    const headScaleMultiplier = 1.15;            // extra scale if image needs more coverage
+    const headY = nose.y + headRadius * 0.15;    // move head downward (was nose.y - headRadius*0.6)
+
+    push();
+    imageMode(CENTER);
+    if (headImage) {
+      image(headImage, nose.x, headY, headRadius * 2 * headScaleMultiplier, headRadius * 2 * headScaleMultiplier);
+    } else {
+      // fallback: simple circle
+      fill(240);
+      circle(nose.x, headY, headRadius * 2 * headScaleMultiplier);
+    }
+    pop();
   }
 
   // limb drawer (thick line + joint circles)
