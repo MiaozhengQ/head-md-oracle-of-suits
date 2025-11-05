@@ -35,7 +35,13 @@ function windowResized() {
 }
 
 function draw() {
-  background(30);
+  // change background when total raises > 6
+  const totalRaises = leftHandCount + rightHandCount;
+  if (totalRaises > 6) {
+    background(255); // white when over 6
+  } else {
+    background(30);  // default background
+  }
 
   // do not draw the camera image (camera still runs for MediaPipe)
   // (previously: mirrored image(capture, 0, 0, width, height);)
@@ -64,10 +70,11 @@ function draw() {
     textAlign(LEFT, TOP);
     text('Gesture: ' + g, 10, 10);
 
-    // display single-hand counts
+    // display single-hand counts and total
     textSize(16);
     text('Left raises: ' + leftHandCount, 10, 38);
     text('Right raises: ' + rightHandCount, 10, 58);
+    text('Total raises: ' + totalRaises, 10, 78);
   } else {
     fill(255);
     noStroke();
