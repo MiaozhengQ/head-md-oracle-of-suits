@@ -125,16 +125,20 @@ function drawAvatar(landmarks, gesture) {
     const shoulderDist = p5.Vector.dist(lShoulder, rShoulder);
     const headRadius = shoulderDist * 0.9;       // was 0.6, larger head
     const headScaleMultiplier = 1.15;            // extra scale if image needs more coverage
-    const headY = nose.y + headRadius * 0.15;    // move head downward (was nose.y - headRadius*0.6)
+    const headY = nose.y + headRadius * 0.01;    // vertical position
+
+    // move head slightly to the left relative to nose (tweak offsetMult to adjust)
+    const offsetMult = -0.22; // 0 = no shift, positive moves left (because of mirroring)
+    const headX = nose.x - shoulderDist * offsetMult;
 
     push();
     imageMode(CENTER);
     if (headImage) {
-      image(headImage, nose.x, headY, headRadius * 2 * headScaleMultiplier, headRadius * 2 * headScaleMultiplier);
+      image(headImage, headX, headY, headRadius * 2 * headScaleMultiplier, headRadius * 2 * headScaleMultiplier);
     } else {
       // fallback: simple circle
       fill(240);
-      circle(nose.x, headY, headRadius * 2 * headScaleMultiplier);
+      circle(headX, headY, headRadius * 2 * headScaleMultiplier);
     }
     pop();
   }
