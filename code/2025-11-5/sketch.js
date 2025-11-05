@@ -32,12 +32,8 @@ function windowResized() {
 function draw() {
   background(30);
 
-  // mirror video (selfie)
-  push();
-  translate(width, 0);
-  scale(-1, 1);
-  image(capture, 0, 0, width, height);
-  pop();
+  // do not draw the camera image (camera still runs for MediaPipe)
+  // (previously: mirrored image(capture, 0, 0, width, height);)
 
   // draw avatar driven by pose landmarks
   if (latestLandmarks) {
