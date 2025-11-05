@@ -5,6 +5,11 @@ let headImage;
 let bodyImage;
 let assImage;
 
+// add single-hand counters and previous single-hand state
+let leftHandCount = 0;
+let rightHandCount = 0;
+let prevSingleHand = 'none';
+
 function preload() {
   // load the head image (place head.png in an 'assets' folder next to sketch.js)
   headImage = loadImage('assets/head.png');
@@ -38,6 +43,19 @@ function draw() {
   // draw avatar driven by pose landmarks
   if (latestLandmarks) {
     const g = detectGesture(latestLandmarks);
+
+    // count rising edge for single-hand raises only (ignore both-hands-up)
+    if (g === 'left hand up' && prevSingleHand !== 'left') {
+      leftHandCount++;
+      prevSingleHand = 'left';
+    } else if (g === 'right hand up' && prevSingleHand !== 'right') {
+      rightHandCount++;
+      prevSingleHand = 'right';
+    } else if (g !== 'left hand up' && g !== 'right hand up') {
+      // reset when neither single-hand gesture is active so next raise counts
+      prevSingleHand = 'none';
+    }
+
     drawAvatar(latestLandmarks, g);
 
     fill(255);
@@ -45,6 +63,11 @@ function draw() {
     textSize(22);
     textAlign(LEFT, TOP);
     text('Gesture: ' + g, 10, 10);
+
+    // display single-hand counts
+    textSize(16);
+    text('Left raises: ' + leftHandCount, 10, 38);
+    text('Right raises: ' + rightHandCount, 10, 58);
   } else {
     fill(255);
     noStroke();
@@ -269,7 +292,7 @@ function getHeadAngle(landmarks) {
     [7, 8],  // leftEar, rightEar (best)
     [3, 6],  // leftEyeOuter, rightEyeOuter
     [2, 5],  // leftEye, rightEye
-    [1, 4],  // leftEyeInner, rightEyeInner
+    [1, 4],  // leftEyeInner, rightEyeInnerz
     [11, 12] // leftShoulder, rightShoulder (fallback)
   ];
   for (let [a, b] of pairs) {
