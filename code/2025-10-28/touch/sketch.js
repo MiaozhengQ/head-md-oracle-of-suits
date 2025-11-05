@@ -268,3 +268,36 @@ function releaseBall(index) {
   }
   if (selectedBall === index) selectedBall = -1;
 }
+
+// Request camera with specific resolution and attach to videoElement
+async function setupVideo() {
+  const constraints = {
+    video: {
+      width: { ideal: 1280 },   // change to desired width (e.g. 640, 1280, 1920)
+      height: { ideal: 720 },   // change to desired height (e.g. 480, 720, 1080)
+      facingMode: 'user',       // 'environment' for back camera on phones
+      frameRate: { ideal: 30 }  // optional: desired frame rate
+    },
+    audio: false
+  };
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+
+    // create or reuse a video element expected by the sketch / MediaPipe
+    if (!window.videoElement) {
+      window.videoElement = document.createElement('video');
+      videoElement.setAttribute('playsinline', ''); // important for mobile
+      videoElement.style.display = 'none';
+      document.body.appendChild(videoElement);
+    }
+
+    videoElement.srcObject = stream;
+    await videoElement.play();
+
+    // if your code expects a p5.Element, you can wrap it:
+    // videoCapture = createCapture(stream); videoCapture.hide();
+  } catch (err) {
+    console.error('Failed to access camera with constraints', constraints, err);
+  }
+}

@@ -1,7 +1,7 @@
 // The setup and draw functions are required for p5.js sketches
 function setup() {
   // Create a canvas that fills the window
-  createCanvas(windowWidth, windowHeight);
+  createCanvas(400, 400);
 }
 
 // The draw function runs continuously in a loop
