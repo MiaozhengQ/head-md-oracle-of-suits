@@ -28,10 +28,11 @@ function draw() {
   image(capture, 0, 0, width, height);
   pop();
 
-  // draw landmarks and gesture
+  // draw avatar driven by pose landmarks
   if (latestLandmarks) {
-    drawPoseLandmarks(latestLandmarks);
     const g = detectGesture(latestLandmarks);
+    drawAvatar(latestLandmarks, g);
+
     fill(255);
     noStroke();
     textSize(22);
@@ -78,42 +79,88 @@ function setupPose() {
   }
 }
 
-// draw landmarks + simple skeleton (mirrored to match video)
-function drawPoseLandmarks(landmarks) {
+// draw a simple stylized person (torso, head, limbs) driven by landmarks
+function drawAvatar(landmarks, gesture) {
   push();
   translate(width, 0);
-  scale(-1, 1); // mirror to match video
-  stroke(0, 200, 150);
-  strokeWeight(2);
+  scale(-1, 1); // same mirroring as video
 
-  // draw connections provided by drawing_utils if available
-  try {
-    const ctx = drawingUtils && drawingUtils.drawConnectors ? drawingUtils : null;
-    // drawing_utils from the CDN doesn't expose easy bridging here in p5,
-    // so draw simple lines for common connections:
-    const pairs = [
-      [11, 12], // shoulders
-      [11, 13], [13, 15], // left arm
-      [12, 14], [14, 16], // right arm
-      [23, 24], // hips
-      [11, 23], [12, 24] // torso
-    ];
-    stroke(100, 220, 180, 200);
-    for (let [a, b] of pairs) {
-      if (landmarks[a] && landmarks[b]) {
-        line(landmarks[a].x * width, landmarks[a].y * height, landmarks[b].x * width, landmarks[b].y * height);
-      }
-    }
-  } catch (e) {}
+  // helper to read landmark -> p5.Vector (or null)
+  const v = i => (landmarks[i] ? createVector(landmarks[i].x * width, landmarks[i].y * height) : null);
+
+  const nose = v(0);
+  const lShoulder = v(11), rShoulder = v(12);
+  const lElbow = v(13), rElbow = v(14);
+  const lWrist = v(15), rWrist = v(16);
+  const lHip = v(23), rHip = v(24);
+  const lKnee = v(25), rKnee = v(26);
+  const lAnkle = v(27), rAnkle = v(28);
+
+  // color by gesture
+  let torsoColor = color(80, 200, 160);
+  if (gesture === 'both hands up') torsoColor = color(80, 255, 120);
+  else if (gesture === 'left hand up') torsoColor = color(200, 160, 80);
+  else if (gesture === 'right hand up') torsoColor = color(160, 80, 200);
 
   noStroke();
-  fill(0, 200, 150);
-  for (let i = 0; i < landmarks.length; i++) {
-    const lm = landmarks[i];
-    const x = lm.x * width;
-    const y = lm.y * height;
-    circle(x, y, 8);
+
+  // draw torso as quad between shoulders and hips if available
+  if (lShoulder && rShoulder && lHip && rHip) {
+    fill(torsoColor);
+    beginShape();
+    vertex(lShoulder.x, lShoulder.y);
+    vertex(rShoulder.x, rShoulder.y);
+    vertex(rHip.x, rHip.y);
+    vertex(lHip.x, lHip.y);
+    endShape(CLOSE);
   }
+
+  // draw head using shoulder width to estimate size
+  if (nose && lShoulder && rShoulder) {
+    const headRadius = p5.Vector.dist(lShoulder, rShoulder) * 0.6;
+    fill(240);
+    circle(nose.x, nose.y - headRadius * 0.6, headRadius * 2);
+    // simple eyes
+    fill(30);
+    circle(nose.x - headRadius * 0.3, nose.y - headRadius * 0.7, headRadius * 0.18);
+    circle(nose.x + headRadius * 0.3, nose.y - headRadius * 0.7, headRadius * 0.18);
+  }
+
+  // limb drawer (thick line + joint circles)
+  function drawLimb(a, b, c) {
+    if (!a || !b) return;
+    stroke(40);
+    strokeWeight(10);
+    line(a.x, a.y, b.x, b.y);
+    noStroke();
+    fill(200);
+    circle(a.x, a.y, 14);
+    circle(b.x, b.y, 14);
+    // optional lower segment to c (e.g., elbow->wrist)
+    if (c && b) {
+      stroke(40);
+      strokeWeight(10);
+      line(b.x, b.y, c.x, c.y);
+      noStroke();
+      fill(200);
+      circle(c.x, c.y, 14);
+    }
+  }
+
+  // arms: shoulder -> elbow -> wrist
+  if (lShoulder && lElbow && lWrist) drawLimb(lShoulder, lElbow, lWrist);
+  else if (lShoulder && lElbow) drawLimb(lShoulder, lElbow, null);
+
+  if (rShoulder && rElbow && rWrist) drawLimb(rShoulder, rElbow, rWrist);
+  else if (rShoulder && rElbow) drawLimb(rShoulder, rElbow, null);
+
+  // legs: hip -> knee -> ankle
+  if (lHip && lKnee && lAnkle) drawLimb(lHip, lKnee, lAnkle);
+  else if (lHip && lKnee) drawLimb(lHip, lKnee, null);
+
+  if (rHip && rKnee && rAnkle) drawLimb(rHip, rKnee, rAnkle);
+  else if (rHip && rKnee) drawLimb(rHip, rKnee, null);
+
   pop();
 }
 
