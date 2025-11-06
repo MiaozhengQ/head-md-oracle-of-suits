@@ -4,6 +4,8 @@ let latestLandmarks = null;
 let headImage;
 let bodyImage;
 let assImage;
+let legLeftImage;
+let legRightImage;
 
 // add single-hand counters and previous single-hand state
 let leftHandCount = 0;
@@ -17,6 +19,9 @@ function preload() {
   bodyImage = loadImage('assets/body.png');
   // load the "ass" image (place ass.png in the assets folder)
   assImage = loadImage('assets/ass.png');
+  // load leg images (place leg-left.png / leg-right.png in assets)
+  legLeftImage = loadImage('assets/leg-left.png');
+  legRightImage = loadImage('assets/leg-right.png');
 }
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -264,11 +269,55 @@ function drawAvatar(landmarks, gesture) {
   else if (rShoulder && rElbow) drawLimb(rShoulder, rElbow, null);
 
   // legs: hip -> knee -> ankle
-  if (lHip && lKnee && lAnkle) drawLimb(lHip, lKnee, lAnkle);
-  else if (lHip && lKnee) drawLimb(lHip, lKnee, null);
+  // draw legs using images if available, otherwise fallback to drawLimb
+  function drawLegImage(img, hip, knee, ankle) {
+    if (!hip) return;
+    const end = ankle ? ankle : (knee ? knee : hip);
+    const start = hip;
+    const len = p5.Vector.dist(start, end);
+    const cx = (start.x + end.x) / 2;
+    const cy = (start.y + end.y) / 2;
+    let ang = atan2(end.y - start.y, end.x - start.x);
 
-  if (rHip && rKnee && rAnkle) drawLimb(rHip, rKnee, rAnkle);
-  else if (rHip && rKnee) drawLimb(rHip, rKnee, null);
+    // --- adjustments: make leg image smaller and correct rotation ---
+    const LEG_SCALE = 0.6;              // smaller overall scale (tweak 0.4..0.8)
+    const ROTATION_CORRECTION = -HALF_PI; // rotate -90deg to fix upside-down image
+    const ORIENT_BY_WIDTH = false;      // false: image height maps to leg length
+
+    if (img) {
+      let imgW, imgH;
+      const aspect = img.width / max(img.height, 1);
+
+      if (ORIENT_BY_WIDTH) {
+        // image width represents leg length
+        imgW = max(len * LEG_SCALE, 8);
+        imgH = imgW / max(aspect, 0.0001);
+      } else {
+        // image height represents leg length (common case)
+        imgH = max(len * LEG_SCALE, 8);
+        imgW = imgH * aspect;
+      }
+
+      push();
+      translate(cx, cy);
+      // rotate to leg direction, then apply correction to match asset orientation
+      rotate(ang + ROTATION_CORRECTION);
+      imageMode(CENTER);
+      image(img, 0, 0, imgW, imgH);
+      pop();
+    } else {
+      drawLimb(start, knee ? knee : end, ankle ? ankle : null);
+    }
+  }
+
+  // left leg (use left leg image if loaded)
+  if (lHip) {
+    drawLegImage(legLeftImage, lHip, lKnee, lAnkle);
+  }
+  // right leg
+  if (rHip) {
+    drawLegImage(legRightImage, rHip, rKnee, rAnkle);
+  }
 
   pop();
 }
