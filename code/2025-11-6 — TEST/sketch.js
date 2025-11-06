@@ -7,10 +7,15 @@ let assImage;
 let legLeftImage;
 let legRightImage;
 
-// add single-hand counters and previous single-hand state
-let leftHandCount = 0;
-let rightHandCount = 0;
-let prevSingleHand = 'none';
+// remove per-hand counters; add presence detection timers
+// let leftHandCount = 0;
+// let rightHandCount = 0;
+// let prevSingleHand = 'none';
+
+// presence detection for person
+let presenceStartMillis = null;
+let presenceTriggered = false;
+const PRESENCE_REQUIRED_MS = 5000; // 5 seconds
 
 function preload() {
   // load the head image (place head.png in an 'assets' folder next to sketch.js)
@@ -40,46 +45,37 @@ function windowResized() {
 }
 
 function draw() {
-  // change background when total raises > 6
-  const totalRaises = leftHandCount + rightHandCount;
-  if (totalRaises > 6) {
-    background(255); // white when over 6
+  // presence = detectable pose landmarks exist for a continuous period
+  if (latestLandmarks) {
+    if (presenceStartMillis === null) presenceStartMillis = millis();
+    const elapsed = millis() - presenceStartMillis;
+    if (elapsed >= PRESENCE_REQUIRED_MS) {
+      presenceTriggered = true;
+    }
   } else {
-    background(30);  // default background
+    // reset when person not present
+    presenceStartMillis = null;
+    presenceTriggered = false;
   }
 
-  // do not draw the camera image (camera still runs for MediaPipe)
-  // (previously: mirrored image(capture, 0, 0, width, height);)
+  // change background when presence maintained for required time
+  if (presenceTriggered) {
+    background(20, 120, 180); // presence-triggered background
+  } else {
+    background(30); // default background
+  }
 
-  // draw avatar driven by pose landmarks
+  // draw avatar driven by pose landmarks (no per-hand counting)
   if (latestLandmarks) {
-    const g = detectGesture(latestLandmarks);
-
-    // count rising edge for single-hand raises only (ignore both-hands-up)
-    if (g === 'left hand up' && prevSingleHand !== 'left') {
-      leftHandCount++;
-      prevSingleHand = 'left';
-    } else if (g === 'right hand up' && prevSingleHand !== 'right') {
-      rightHandCount++;
-      prevSingleHand = 'right';
-    } else if (g !== 'left hand up' && g !== 'right hand up') {
-      // reset when neither single-hand gesture is active so next raise counts
-      prevSingleHand = 'none';
-    }
-
-    drawAvatar(latestLandmarks, g);
+    drawAvatar(latestLandmarks, 'present');
 
     fill(255);
     noStroke();
     textSize(22);
     textAlign(LEFT, TOP);
-    text('Gesture: ' + g, 10, 10);
-
-    // display single-hand counts and total
-    textSize(16);
-    text('Left raises: ' + leftHandCount, 10, 38);
-    text('Right raises: ' + rightHandCount, 10, 58);
-    text('Total raises: ' + totalRaises, 10, 78);
+    const sec = presenceStartMillis ? Math.floor((millis() - presenceStartMillis) / 1000) : 0;
+    text('Person present sec: ' + sec, 10, 10);
+    text('Presence active: ' + (presenceTriggered ? 'yes' : 'no'), 10, 36);
   } else {
     fill(255);
     noStroke();
@@ -145,6 +141,46 @@ function drawAvatar(landmarks, gesture) {
   else if (gesture === 'right hand up') torsoColor = color(160, 80, 200);
 
   noStroke();
+
+  // draw legs helper must be available before drawing the body/ass so legs can be drawn underneath
+  function drawLegImage(img, hip, knee, ankle) {
+    if (!hip) return;
+    const end = ankle ? ankle : (knee ? knee : hip);
+    const start = hip;
+    const len = p5.Vector.dist(start, end);
+    const cx = (start.x + end.x) / 2;
+    const cy = (start.y + end.y) / 2;
+    let ang = atan2(end.y - start.y, end.x - start.x);
+
+    // adjustments: smaller & rotation correction (tweak if needed)
+    const LEG_SCALE = 0.6;
+    const ROTATION_CORRECTION = -HALF_PI;
+    const ORIENT_BY_WIDTH = false;
+
+    if (img) {
+      let imgW, imgH;
+      const aspect = img.width / max(img.height, 1);
+      if (ORIENT_BY_WIDTH) {
+        imgW = max(len * LEG_SCALE, 8);
+        imgH = imgW / max(aspect, 0.0001);
+      } else {
+        imgH = max(len * LEG_SCALE, 8);
+        imgW = imgH * aspect;
+      }
+      push();
+      translate(cx, cy);
+      rotate(ang + ROTATION_CORRECTION);
+      imageMode(CENTER);
+      image(img, 0, 0, imgW, imgH);
+      pop();
+    } else {
+      drawLimb(start, knee ? knee : end, ankle ? ankle : null);
+    }
+  }
+
+  // draw legs first so they are behind body/ass
+  if (lHip) drawLegImage(legLeftImage, lHip, lKnee, lAnkle);
+  if (rHip) drawLegImage(legRightImage, rHip, rKnee, rAnkle);
 
   // --- replace torso quad with body image when available ---
   if (lShoulder && rShoulder && lHip && rHip) {
@@ -279,28 +315,23 @@ function drawAvatar(landmarks, gesture) {
     const cy = (start.y + end.y) / 2;
     let ang = atan2(end.y - start.y, end.x - start.x);
 
-    // --- adjustments: make leg image smaller and correct rotation ---
-    const LEG_SCALE = 0.6;              // smaller overall scale (tweak 0.4..0.8)
-    const ROTATION_CORRECTION = -HALF_PI; // rotate -90deg to fix upside-down image
-    const ORIENT_BY_WIDTH = false;      // false: image height maps to leg length
+    // adjustments: smaller & rotation correction (tweak if needed)
+    const LEG_SCALE = 0.6;
+    const ROTATION_CORRECTION = -HALF_PI;
+    const ORIENT_BY_WIDTH = false;
 
     if (img) {
       let imgW, imgH;
       const aspect = img.width / max(img.height, 1);
-
       if (ORIENT_BY_WIDTH) {
-        // image width represents leg length
         imgW = max(len * LEG_SCALE, 8);
         imgH = imgW / max(aspect, 0.0001);
       } else {
-        // image height represents leg length (common case)
         imgH = max(len * LEG_SCALE, 8);
         imgW = imgH * aspect;
       }
-
       push();
       translate(cx, cy);
-      // rotate to leg direction, then apply correction to match asset orientation
       rotate(ang + ROTATION_CORRECTION);
       imageMode(CENTER);
       image(img, 0, 0, imgW, imgH);
