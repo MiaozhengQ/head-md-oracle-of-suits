@@ -3,6 +3,17 @@ let maxBalls = 25;
 let lastTouchTime = 0;
 let touchCooldown = 300; // ms per-ball cooldown
 
+// suit images
+let diamondImg, clubImg, heartImg, spadeImg;
+
+function preload() {
+  // put diamond.png, club.png, heart.png, spade.png in an "assets" folder next to this sketch
+  diamondImg = loadImage('assets/diamond.png');
+  clubImg    = loadImage('assets/club.png');
+  heartImg   = loadImage('assets/heart.png');
+  spadeImg   = loadImage('assets/spade.png');
+}
+
 // selection / dragging state
 let selectedBall = -1;
 let selectedHand = -1; // index of the hand that grabbed the ball
@@ -36,6 +47,8 @@ function setup() {
       baseRadius: random(20, 60),
       radius: 0, // will be set below
       color: color(random(255), 200, 200),
+      // assign random suit (or null for plain circle)
+      suit: random() < 0.6 ? random(['diamond','club','heart','spade']) : null,
       wiggle: random(-2, 2),
       wiggleSpeed: random(0.03, 0.08), // controls how fast it moves
       noiseX: random(1000), // per-ball noise offsets for stable motion
@@ -110,46 +123,50 @@ function draw() {
         // slowly adapt baseline when not approaching
         if (!approached) baselineFingerZ[h] = lerp(baselineFingerZ[h], z, 0.02);
 
-        // PICK: if no selection, pick when fingertip overlaps ball in 2D
+        // PICK: if no selection, require BOTH 2D overlap AND approach (depth) to grab
         if (selectedBall === -1) {
           for (let bi = 0; bi < balls.length; bi++) {
             const b = balls[bi];
             if (!b.active) continue;
             const d = dist(ix, iy, b.x, b.y);
-            if (d <= b.radius && (millis() - b.lastTouched > touchCooldown)) {
-              // grab this ball on 2D overlap
-              selectedBall = bi;
-              selectedHand = h;
-              dragOffsetX = b.x - ix;
-              dragOffsetY = b.y - iy;
-              b.lastTouched = millis();
-              b.color = color(random(255), 220, 220);
-              b.radius += 12;
-              setTimeout(() => { b.radius = max(b.baseRadius, b.radius - 12); }, 160);
-              break;
-            }
-          }
-        } else if (selectedBall !== -1 && selectedHand === h) {
-          // MOVE: owning hand moves the selected ball while held
-          const b = balls[selectedBall];
-          if (b) {
-            b.x = ix + dragOffsetX;
-            b.y = iy + dragOffsetY;
-
-            // RELEASE: when the finger intentionally approaches (comes closer than baseline)
-            // i.e. approach gesture releases the ball
-            if (approached) {
-              b.radius = b.baseRadius;
-              selectedBall = -1;
-              selectedHand = -1;
-            }
-          } else {
-            selectedBall = -1;
-            selectedHand = -1;
-          }
-        }
-      }
-    } // end of hands loop
+            // require fingertip to overlap circle AND be moving closer than baseline
+            if (d <= b.radius && approached && (millis() - b.lastTouched > touchCooldown)) {
+               // grab this ball on 2D overlap
+               selectedBall = bi;
+               selectedHand = h;
+               dragOffsetX = b.x - ix;
+               dragOffsetY = b.y - iy;
+               b.lastTouched = millis();
+               b.color = color(random(255), 220, 220);
+               b.radius += 12;
+               setTimeout(() => { b.radius = max(b.baseRadius, b.radius - 12); }, 160);
+               break;
+             }
+           }
+         } else if (selectedBall !== -1 && selectedHand === h) {
+           // MOVE: owning hand moves the selected ball while held
+           const b = balls[selectedBall];
+           if (b) {
+             b.x = ix + dragOffsetX;
+             b.y = iy + dragOffsetY;
+ 
+            // RELEASE: when the finger retreats (moves away in depth) OR moves far in 2D
+            // (dz drops below a fraction of threshold => finger retreated)
+            const releaseByDepth = dz < (DEPTH_THRESHOLD * RELEASE_DEPTH_FACTOR);
+            const d2 = dist(ix, iy, b.x, b.y);
+            const releaseByDist = d2 > RELEASE_DISTANCE;
+            if (releaseByDepth || releaseByDist) {
+               b.radius = b.baseRadius;
+               selectedBall = -1;
+               selectedHand = -1;
+             }
+           } else {
+             selectedBall = -1;
+             selectedHand = -1;
+           }
+         }
+       }
+     } // end of hands loop
 
   } // end of if detections
   // draw all balls
@@ -274,6 +291,26 @@ function drawBalls() {
     const t = frameCount;
     const rx = (noise(b.noiseX + t * b.wiggleSpeed)) * 10 * b.wiggle;
     const ry = (noise(b.noiseY + t * b.wiggleSpeed)) * 10 * b.wiggle;
+    // draw suit image when assigned, otherwise fallback to circle
+    if (b.suit) {
+      let img = null;
+      if (b.suit === 'diamond') img = diamondImg;
+      else if (b.suit === 'club') img = clubImg;
+      else if (b.suit === 'heart') img = heartImg;
+      else if (b.suit === 'spade') img = spadeImg;
+
+      if (img) {
+        push();
+        imageMode(CENTER);
+        // draw image scaled to ball radius (height = diameter)
+        const drawW = (b.radius * 2) * (img.width / max(img.height, 1));
+        const drawH = b.radius * 2;
+        image(img, b.x + rx, b.y + ry, drawW, drawH);
+        pop();
+        continue;
+      }
+    }
+    // fallback
     circle(b.x + rx, b.y + ry, b.radius * 2);
   }
 }
