@@ -11,6 +11,12 @@ let dragOffsetY = 0;
 const RELEASE_DISTANCE = 120; // px threshold to release when finger moves away
 const ballRadius = 50; // fallback used by helper (if needed)
 
+// --- depth-based pick settings (pick-by-depth / approach) ---
+let baselineFingerZ = [];            // per-hand baseline z to detect approach
+const DEPTH_THRESHOLD = 0.08;        // z-delta required to consider "approach" (tune)
+const PICK_RADIUS = 140;             // px radius to search nearest ball when approach happens
+const RELEASE_DEPTH_FACTOR = 0.5;    // fraction of DEPTH_THRESHOLD below which to release
+
 function setup() {
 
   // full window canvas
@@ -87,27 +93,36 @@ function draw() {
       // touch check per hand (guarded, with cooldown)
       
 
-      // touch / grab check per hand (check all balls)
+      // touch / grab check per hand (use 2D overlap to pick, approach to release)
       const m = hand[FINGER_TIPS.index];
       if (m) {
         const ix = m.x * width;
         const iy = m.y * height;
+        const z = (typeof m.z === 'number') ? m.z : 0;
 
-        // If a ball is already selected by another hand ignore selection here,
-        // but still allow the owning hand to move it.
+        // initialize baseline for this hand
+        if (baselineFingerZ[h] == null) baselineFingerZ[h] = z;
+
+        // compute approach delta: positive when fingertip is closer than baseline
+        const dz = baselineFingerZ[h] - z;
+        const approached = dz > DEPTH_THRESHOLD;
+
+        // slowly adapt baseline when not approaching
+        if (!approached) baselineFingerZ[h] = lerp(baselineFingerZ[h], z, 0.02);
+
+        // PICK: if no selection, pick when fingertip overlaps ball in 2D
         if (selectedBall === -1) {
           for (let bi = 0; bi < balls.length; bi++) {
             const b = balls[bi];
             if (!b.active) continue;
             const d = dist(ix, iy, b.x, b.y);
             if (d <= b.radius && (millis() - b.lastTouched > touchCooldown)) {
-              // grab this ball
+              // grab this ball on 2D overlap
               selectedBall = bi;
               selectedHand = h;
               dragOffsetX = b.x - ix;
               dragOffsetY = b.y - iy;
               b.lastTouched = millis();
-              // visual feedback
               b.color = color(random(255), 220, 220);
               b.radius += 12;
               setTimeout(() => { b.radius = max(b.baseRadius, b.radius - 12); }, 160);
@@ -115,18 +130,22 @@ function draw() {
             }
           }
         } else if (selectedBall !== -1 && selectedHand === h) {
-          // owning hand moves the selected ball while finger remains reasonably close
+          // MOVE: owning hand moves the selected ball while held
           const b = balls[selectedBall];
           if (b) {
-            const d = dist(ix, iy, b.x, b.y);
-            // update position to follow finger (with stored offset)
             b.x = ix + dragOffsetX;
             b.y = iy + dragOffsetY;
-            // release the ball if finger moved too far away
-            if (d > RELEASE_DISTANCE) {
+
+            // RELEASE: when the finger intentionally approaches (comes closer than baseline)
+            // i.e. approach gesture releases the ball
+            if (approached) {
               b.radius = b.baseRadius;
               selectedBall = -1;
+              selectedHand = -1;
             }
+          } else {
+            selectedBall = -1;
+            selectedHand = -1;
           }
         }
       }
