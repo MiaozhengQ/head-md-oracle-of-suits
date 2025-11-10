@@ -153,8 +153,11 @@ function draw() {
                dragOffsetY = b.y - iy;
                b.lastTouched = millis();
                b.color = color(random(255), 220, 220);
-               b.radius += 12;
-               setTimeout(() => { b.radius = max(b.baseRadius, b.radius - 12); }, 160);
+               // mark picked state for pulsing/flash animation
+               b.isPicked = true;
+               b.pulseStart = millis();
+               b.flashUntil = millis() + 400; // flash duration in ms
+               b.pulseBaseRadius = b.radius = b.baseRadius * 1.35; // immediate enlarge
                break;
              }
            }
@@ -171,6 +174,8 @@ function draw() {
             const d2 = dist(ix, iy, b.x, b.y);
             const releaseByDist = d2 > RELEASE_DISTANCE;
             if (releaseByDepth || releaseByDist) {
+               // clear picked state and restore base size
+               b.isPicked = false;
                b.radius = b.baseRadius;
                selectedBall = -1;
                selectedHand = -1;
@@ -301,11 +306,34 @@ function drawConnections(landmarks) {
 function drawBalls() {
   noStroke();
   for (let b of balls) {
+    // pulse if picked
+    let pulseMul = 1;
+    if (b.isPicked) {
+      const t = (millis() - (b.pulseStart || 0)) * 0.006; // speed
+      pulseMul = 1 + 0.12 * sin(TWO_PI * t);
+    }
+
+    // flash glow while flashUntil not passed
+    const isFlashing = b.flashUntil && millis() < b.flashUntil;
+
     fill(b.color);
     // smooth, deterministic wiggle using Perlin noise (stable across frames)
-    const t = frameCount;
-    const rx = (noise(b.noiseX + t * b.wiggleSpeed)) * 10 * b.wiggle;
-    const ry = (noise(b.noiseY + t * b.wiggleSpeed)) * 10 * b.wiggle;
+    const tframe = frameCount;
+    const rx = (noise(b.noiseX + tframe * b.wiggleSpeed)) * 10 * b.wiggle;
+    const ry = (noise(b.noiseY + tframe * b.wiggleSpeed)) * 10 * b.wiggle;
+
+    const drawRadius = (b.radius || b.baseRadius) * pulseMul;
+
+    // draw glow ring when flashing
+    if (isFlashing) {
+      push();
+      noFill();
+      stroke(255, 200, 200, map(millis(), b.pulseStart, b.flashUntil, 220, 20, true));
+      strokeWeight(6);
+      circle(b.x + rx, b.y + ry, drawRadius * 2 + 18);
+      pop();
+    }
+
     // draw suit image when assigned, otherwise fallback to circle
     if (b.suit) {
       let img = null;
@@ -318,15 +346,15 @@ function drawBalls() {
         push();
         imageMode(CENTER);
         // draw image scaled to ball radius (height = diameter)
-        const drawW = (b.radius * 2) * (img.width / max(img.height, 1));
-        const drawH = b.radius * 2;
+        const drawH = drawRadius * 2;
+        const drawW = drawH * (img.width / max(img.height, 1));
         image(img, b.x + rx, b.y + ry, drawW, drawH);
         pop();
         continue;
       }
     }
     // fallback
-    circle(b.x + rx, b.y + ry, b.radius * 2);
+    circle(b.x + rx, b.y + ry, drawRadius * 2);
   }
 }
  
