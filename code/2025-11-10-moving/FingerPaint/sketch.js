@@ -1,5 +1,5 @@
 let balls = [];
-let maxBalls = 25;
+let maxBalls = 10;  // decrease from 25 to 10 (4 suits + 6 circles)
 let lastTouchTime = 0;
 let touchCooldown = 300; // ms per-ball cooldown
 
@@ -37,36 +37,31 @@ const PICK_RADIUS = 140;             // px radius to search nearest ball when ap
 const RELEASE_DEPTH_FACTOR = 0.5;    // fraction of DEPTH_THRESHOLD below which to release
 
 function setup() {
-
-  // small window canvas 
-  // create fixed-size canvas and keep a reference
   cnv = createCanvas(450, 580);
-  // position the canvas in the center of the window
   centerCanvas();
- 
-  // initialize MediaPipe settings
   setupHands();
-  // start camera using MediaPipeHands.js helper
   setupVideo();
-  // set color mode to HSB for better color blending
   colorMode(HSB, 255);
   
-  // create offscreen graphics for the circular moving canvas
   circleG = createGraphics(width, height);
   
-  // create many random balls
+  // shuffle suits so each appears exactly once
+  const suitsPool = shuffle(['diamond', 'club', 'heart', 'spade']);
+  
+  // create balls: one of each suit + plain circles
   for (let i = 0; i < maxBalls; i++) {
+    const suit = (i < suitsPool.length) ? suitsPool[i] : null;
+    
     balls.push({
       x: random(width * 0.1, width * 0.9),
       y: random(height * 0.1, height * 0.9),
       baseRadius: random(20, 60),
-      radius: 0, // will be set below
+      radius: 0,
       color: color(random(255), 200, 200),
-      // assign random suit (or null for plain circle)
-      suit: random() < 0.6 ? random(['diamond','club','heart','spade']) : null,
+      suit: suit,
       wiggle: random(-2, 2),
-      wiggleSpeed: random(0.03, 0.08), // controls how fast it moves
-      noiseX: random(1000), // per-ball noise offsets for stable motion
+      wiggleSpeed: random(0.03, 0.08),
+      noiseX: random(1000),
       noiseY: random(1000),
       lastTouched: 0,
       active: true
@@ -224,11 +219,51 @@ function drawConnectionsToGraphics(landmarks, g) {
 function drawBallsToGraphics(g) {
   if (!g) return;
   g.noStroke();
+  const now = millis();
+  
   for (let b of balls) {
     g.fill(b.color);
     const t = frameCount;
-    const rx = (noise(b.noiseX + t * b.wiggleSpeed)) * 10 * b.wiggle;
-    const ry = (noise(b.noiseY + t * b.wiggleSpeed)) * 10 * b.wiggle;
+    
+    // initialize pulse state per ball
+    if (b.pulseStart == null) b.pulseStart = 0;
+    if (b.wasInside == null) b.wasInside = false;
+    
+    // only suits wiggle; circles stay static
+    let rx = 0, ry = 0;
+    if (b.suit) {
+      rx = (noise(b.noiseX + t * b.wiggleSpeed)) * 20 * b.wiggle; // increased multiplier
+      ry = (noise(b.noiseY + t * b.wiggleSpeed)) * 20 * b.wiggle;
+    }
+    
+    // check if suit is inside the circle mask
+    const inside = indexPos && dist(b.x, b.y, indexPos.x, indexPos.y) <= INDEX_CIRCLE_RADIUS;
+    
+    // trigger pulse when entering the circle
+    if (b.suit && inside && !b.wasInside) {
+      b.wasInside = true;
+      b.pulseStart = now;
+    } else if (!inside) {
+      b.wasInside = false;
+    }
+    
+    // compute pulse multiplier (grows then settles)
+    let pulseMul = 1;
+    const PULSE_DURATION = 1200; // ms — increased from 480 to 1200
+    if (b.suit && b.pulseStart && (now - b.pulseStart) < PULSE_DURATION) {
+      const e = (now - b.pulseStart) / PULSE_DURATION; // 0..1
+      const ease = 1 - (1 - e) * (1 - e); // ease out quad
+      pulseMul = 1 + 1.2 * (1 - ease); // increased pulse intensity from 0.6 to 1.2
+    } else if (b.suit && b.pulseStart && (now - b.pulseStart) >= PULSE_DURATION) {
+      b.pulseStart = 0;
+    }
+    
+    // flash alpha when inside
+    let imgAlpha = 255;
+    if (b.suit && inside) {
+      imgAlpha = 150 + floor(105 * (0.5 + 0.5 * sin(TWO_PI * (0.06 * t + b.noiseY)))); // slower flash
+    }
+    
     if (b.suit) {
       let img = null;
       if (b.suit === 'diamond') img = diamondImg;
@@ -239,13 +274,16 @@ function drawBallsToGraphics(g) {
       if (img) {
         g.push();
         g.imageMode(CENTER);
-        const drawW = (b.radius * 2) * (img.width / max(img.height, 1));
-        const drawH = b.radius * 2;
+        g.tint(255, imgAlpha); // apply flash
+        const drawW = (b.radius * 2) * pulseMul * (img.width / max(img.height, 1));
+        const drawH = (b.radius * 2) * pulseMul; // apply pulse scale
         g.image(img, b.x + rx, b.y + ry, drawW, drawH);
         g.pop();
         continue;
       }
     }
+    
+    // plain circle: no wiggle, no pulse
     g.circle(b.x + rx, b.y + ry, b.radius * 2);
   }
 }
