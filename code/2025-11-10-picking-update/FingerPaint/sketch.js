@@ -208,7 +208,7 @@ function drawIndex(landmarks) {
   // adapt the coordinates (0..1) to video coordinates
   let x = mark.x * width;
   let y = mark.y * height;
-  circle(x, y, 20);
+  circle(x, y, 10);
   //draw lines from index tip randomly direction to borders of canvas
   stroke(random(255), 90, 100);
   strokeWeight(1);
@@ -274,7 +274,7 @@ if (!landmarks) return;
     if (!mark) continue;              // guard added
     let x = mark.x * width;
     let y = mark.y * height;
-    circle(x, y, 6);
+    circle(x, y, 2);
   }
 }
 
