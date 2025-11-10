@@ -30,6 +30,8 @@ let baselineFingerZ = [];            // per-hand baseline z to detect approach
 const DEPTH_THRESHOLD = 0.08;        // z-delta required to consider "approach" (tune)
 const PICK_RADIUS = 140;             // px radius to search nearest ball when approach happens
 const RELEASE_DEPTH_FACTOR = 0.5;    // fraction of DEPTH_THRESHOLD below which to release
+const DEPTH_RATIO_THRESHOLD = 0.1;   // ratio of change compared to baseline to consider as approached
+const BASELINE_ADAPT_RATE = 0.02;   // rate at which baseline adapts when not approaching
 
 function setup() {
 
@@ -133,10 +135,16 @@ function draw() {
 
         // compute approach delta: positive when fingertip is closer than baseline
         const dz = baselineFingerZ[h] - z;
-        const approached = dz > DEPTH_THRESHOLD;
+
+        // relative detection: if hand is far, absolute dz may be tiny — use ratio test too
+        const absBaseline = max(0.0001, Math.abs(baselineFingerZ[h]));
+        const dzRatio = dz / absBaseline; // proportion change compared to baseline
+
+        // consider approached when either absolute delta passes or relative ratio passes
+        const approached = (dz > DEPTH_THRESHOLD) || (dzRatio > DEPTH_RATIO_THRESHOLD);
 
         // slowly adapt baseline when not approaching
-        if (!approached) baselineFingerZ[h] = lerp(baselineFingerZ[h], z, 0.02);
+        if (!approached) baselineFingerZ[h] = lerp(baselineFingerZ[h], z, BASELINE_ADAPT_RATE);
 
         // PICK: if no selection, require BOTH 2D overlap AND approach (depth) to grab
         if (selectedBall === -1) {
@@ -168,12 +176,14 @@ function draw() {
              b.x = ix + dragOffsetX;
              b.y = iy + dragOffsetY;
  
-            // RELEASE: when the finger retreats (moves away in depth) OR moves far in 2D
-            // (dz drops below a fraction of threshold => finger retreated)
-            const releaseByDepth = dz < (DEPTH_THRESHOLD * RELEASE_DEPTH_FACTOR);
+            // RELEASE: when the finger retreats (depth) OR moves far in 2D
+            // require both absolute and relative depth to have dropped for far hands
+            const releaseByDepth = (dz < (DEPTH_THRESHOLD * RELEASE_DEPTH_FACTOR));
+            const releaseByRatio = (dzRatio < (DEPTH_RATIO_THRESHOLD * RELEASE_DEPTH_FACTOR));
             const d2 = dist(ix, iy, b.x, b.y);
             const releaseByDist = d2 > RELEASE_DISTANCE;
-            if (releaseByDepth || releaseByDist) {
+            // consider release when distance OR both depth tests indicate retreat
+            if (releaseByDist || (releaseByDepth && releaseByRatio)) {
                // clear picked state and restore base size
                b.isPicked = false;
                b.radius = b.baseRadius;
@@ -369,3 +379,69 @@ function drawBalls() {
    const by = height / 2;
    return dist(ix, iy, bx, by) <= ballRadius;
  }
+
+// offscreen canvas for crop+upscale (software zoom)
+const zoomCanvas = document.createElement('canvas');
+const zoomCtx = zoomCanvas.getContext('2d');
+
+// tune these
+const ZOOM_FACTOR = 1.6;        // >1 zooms in (1.4-2.0 recommended)
+const MODEL_WIDTH = 640;        // what you send to MediaPipe
+const MODEL_HEIGHT = 480;
+
+// call this instead of setupVideo() / Camera helper directly
+function startHandsWithCrop(videoEl, handsInstance) {
+  if (!videoEl || !handsInstance) return;
+  // lower detection thresholds so distant hands are detected
+  handsInstance.setOptions({
+    maxNumHands: 2,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.35, // lower -> more sensitive (may increase false positives)
+    minTrackingConfidence: 0.35,
+    refineLandmarks: true
+  });
+
+  zoomCanvas.width = MODEL_WIDTH;
+  zoomCanvas.height = MODEL_HEIGHT;
+
+  // Use MediaPipe Camera helper if available
+  if (typeof Camera !== 'undefined') {
+    const cam = new Camera(videoEl, {
+      onFrame: async () => {
+        // compute centered crop area on the incoming video
+        const vw = videoEl.videoWidth || videoEl.width || MODEL_WIDTH;
+        const vh = videoEl.videoHeight || videoEl.height || MODEL_HEIGHT;
+        const cropW = Math.floor(vw / ZOOM_FACTOR);
+        const cropH = Math.floor(vh / ZOOM_FACTOR);
+        const cx = Math.max(0, Math.floor((vw - cropW) / 2));
+        const cy = Math.max(0, Math.floor((vh - cropH) / 2));
+        // draw cropped region scaled to model size
+        zoomCtx.drawImage(videoEl, cx, cy, cropW, cropH, 0, 0, MODEL_WIDTH, MODEL_HEIGHT);
+        // send the offscreen canvas to MediaPipe
+        await handsInstance.send({ image: zoomCanvas });
+      },
+      width: MODEL_WIDTH,
+      height: MODEL_HEIGHT
+    });
+    cam.start();
+    console.log('Started Camera with crop+upscale, ZOOM_FACTOR=', ZOOM_FACTOR);
+  } else {
+    // fallback: interval sender
+    setInterval(async () => {
+      const vw = videoEl.videoWidth || MODEL_WIDTH;
+      const vh = videoEl.videoHeight || MODEL_HEIGHT;
+      const cropW = Math.floor(vw / ZOOM_FACTOR);
+      const cropH = Math.floor(vh / ZOOM_FACTOR);
+      const cx = Math.max(0, Math.floor((vw - cropW) / 2));
+      const cy = Math.max(0, Math.floor((vh - cropH) / 2));
+      zoomCtx.drawImage(videoEl, cx, cy, cropW, cropH, 0, 0, MODEL_WIDTH, MODEL_HEIGHT);
+      await handsInstance.send({ image: zoomCanvas });
+    }, 33);
+    console.log('Started fallback crop sender');
+  }
+}
+
+// Example usage: call in your setup() after capture ready
+// capture.elt.addEventListener('loadeddata', () => {
+//   startHandsWithCrop(capture.elt, hands); // `hands` is your MediaPipe Hands instance
+// });
