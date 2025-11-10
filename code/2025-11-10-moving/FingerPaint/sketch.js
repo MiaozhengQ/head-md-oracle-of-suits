@@ -13,6 +13,9 @@ let cnv = null;
 let circleG; // offscreen graphics for circular canvas
 const INDEX_CIRCLE_RADIUS = 90;
 let indexPos = null; // position of index finger circle
+let canvasBG; // background color
+let maskColor; // color tint inside the circular mask
+const SUIT_SCALE = 1.8; // suit image size multiplier
 
 function preload() {
   // put diamond.png, club.png, heart.png, spade.png in an "assets" folder next to this sketch
@@ -42,6 +45,11 @@ function setup() {
   setupHands();
   setupVideo();
   colorMode(HSB, 255);
+  
+  // set canvas background color
+  canvasBG = color(210, 80, 30);
+  // set mask color (HSB: hue, saturation, brightness, alpha)
+  maskColor = color(200, 40, 60, 120); // tweak these values
   
   circleG = createGraphics(width, height);
   
@@ -85,8 +93,8 @@ function centerCanvas() {
 }
  
 function draw() {
-  background(20, 100, 100, 100);
-
+  background(canvasBG);
+  
   // clear the offscreen circular canvas
   circleG.clear();
   
@@ -169,6 +177,11 @@ function draw() {
     drawingContext.beginPath();
     drawingContext.arc(indexPos.x, indexPos.y, INDEX_CIRCLE_RADIUS, 0, TWO_PI);
     drawingContext.clip();
+
+    // fill the clipped area with mask color BEFORE drawing content
+    noStroke();
+    fill(maskColor);
+    rect(0, 0, width, height);
 
     // draw the offscreen graphics (only visible inside circle)
     image(circleG, 0, 0);
@@ -274,9 +287,9 @@ function drawBallsToGraphics(g) {
       if (img) {
         g.push();
         g.imageMode(CENTER);
-        g.tint(255, imgAlpha); // apply flash
-        const drawW = (b.radius * 2) * pulseMul * (img.width / max(img.height, 1));
-        const drawH = (b.radius * 2) * pulseMul; // apply pulse scale
+        g.tint(255, imgAlpha);
+        const drawW = (b.radius * 2) * pulseMul * SUIT_SCALE * (img.width / max(img.height, 1));
+        const drawH = (b.radius * 2) * pulseMul * SUIT_SCALE;
         g.image(img, b.x + rx, b.y + ry, drawW, drawH);
         g.pop();
         continue;
