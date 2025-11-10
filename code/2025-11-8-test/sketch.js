@@ -291,7 +291,7 @@ function drawAvatar(landmarks, gesture) {
 
     // compute neck pivot from shoulders (midpoint) and small upward offset
     const midShoulder = createVector((lShoulder.x + rShoulder.x) / 2, (lShoulder.y + rShoulder.y) / 2);
-    const NECK_UP = shoulderDist * 0.08; // tune to move pivot slightly up
+    const NECK_UP = shoulderDist * 0.18; // tune to move pivot slightly up
     // reduce left shift to move head slightly to the right
     const offsetMult = -0.14; // smaller negative => head moves right relative to previous
     const pivotX = midShoulder.x - shoulderDist * offsetMult;
@@ -306,6 +306,7 @@ function drawAvatar(landmarks, gesture) {
     push();
     imageMode(CENTER);
     translate(pivotX, pivotY);
+    
     rotate(headAngle + PI); // keep +PI if image asset needs that correction
     if (headImage) {
       // draw image so its bottom edge sits at pivot (y = -imgH/2)
