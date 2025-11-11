@@ -17,6 +17,7 @@ let indexPos = null; // position of index finger circle
 let canvasBG; // background color
 let maskColor; // color tint inside the circular mask
 const SUIT_SCALE = 1.8; // suit image size multiplier
+const MIRROR_SCALE = 2.2; // broken mirror image size multiplier
 
 function preload() {
   // put diamond.png, club.png, heart.png, spade.png in an "assets" folder next to this sketch
@@ -310,7 +311,7 @@ function drawBallsToGraphics(g) {
       g.push();
       g.imageMode(CENTER);
       const img = mirrorImgs[b.mirrorIndex];
-      const drawH = b.radius * 2; // match previous circle size
+      const drawH = b.radius * 5 * MIRROR_SCALE; // scaled up
       const drawW = drawH * (img.width / max(img.height, 1));
       g.image(img, b.x, b.y, drawW, drawH);
       g.pop();
