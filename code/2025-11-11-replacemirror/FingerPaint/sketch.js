@@ -5,6 +5,7 @@ let touchCooldown = 300; // ms per-ball cooldown
 
 // suit images
 let diamondImg, clubImg, heartImg, spadeImg;
+let mirrorImgs = []; // mirror1..mirror4
 
 // p5 canvas reference so we can position it in the page
 let cnv = null;
@@ -15,7 +16,10 @@ const INDEX_CIRCLE_RADIUS = 90;
 let indexPos = null; // position of index finger circle
 let canvasBG; // background color
 let maskColor; // color tint inside the circular mask
-const SUIT_SCALE = 1.8; // suit image size multiplier
+const SUIT_SCALE = 1.8;
+const MIRROR_SCALE = 2.2;
+const MIRROR_ALPHA = 180;
+const EDGE_MARGIN = 20; // minimum distance from any image edge to canvas border
 
 function preload() {
   // put diamond.png, club.png, heart.png, spade.png in an "assets" folder next to this sketch
@@ -23,6 +27,10 @@ function preload() {
   clubImg    = loadImage('assets/club.png');
   heartImg   = loadImage('assets/heart.png');
   spadeImg   = loadImage('assets/spade.png');
+  // load broken mirror images: assets/mirror1.png ... assets/mirror4.png
+  for (let i = 1; i <= 4; i++) {
+    mirrorImgs.push(loadImage(`assets/mirror${i}.png`));
+  }
 }
 
 // selection / dragging state
@@ -49,7 +57,7 @@ function setup() {
   // set canvas background color
   canvasBG = color(210, 80, 30);
   // set mask color (HSB: hue, saturation, brightness, alpha)
-  maskColor = color(200, 40, 60, 120); // tweak these values
+  maskColor = color(150, 100, 200, 120); // tweak these values
   
   circleG = createGraphics(width, height);
   
@@ -59,11 +67,22 @@ function setup() {
   // create balls: one of each suit + plain circles
   for (let i = 0; i < maxBalls; i++) {
     const suit = (i < suitsPool.length) ? suitsPool[i] : null;
+    const mirrorIndex = (suit === null) ? ((i - suitsPool.length) % mirrorImgs.length) : -1;
+    
+    const baseR = random(20, 60);
+    // pre‑compute max rendered radius for proper initial placement
+    const renderRadius = suit
+      ? baseR * SUIT_SCALE
+      : (baseR * 2.5 * MIRROR_SCALE); // mirror: drawH = baseR*5*MIRROR_SCALE so radius = half
+    const minX = renderRadius + EDGE_MARGIN;
+    const maxX = width - renderRadius - EDGE_MARGIN;
+    const minY = renderRadius + EDGE_MARGIN;
+    const maxY = height - renderRadius - EDGE_MARGIN;
     
     balls.push({
-      x: random(width * 0.1, width * 0.9),
-      y: random(height * 0.1, height * 0.9),
-      baseRadius: random(20, 60),
+      x: random(minX, maxX),
+      y: random(minY, maxY),
+      baseRadius: baseR,
       radius: 0,
       color: color(random(255), 200, 200),
       suit: suit,
@@ -72,15 +91,20 @@ function setup() {
       noiseX: random(1000),
       noiseY: random(1000),
       lastTouched: 0,
-      active: true
+      active: true,
+      isMirror: suit === null,
+      mirrorIndex: mirrorIndex
     });
   }
   balls.forEach(b => b.radius = b.baseRadius);
+  enforceMaxOverlap(0.10);
+  keepInsideAllBalls(); // final clamp after overlap adjustment
 }
 
 function windowResized() {
   // reposition canvas to stay centered on window resize
   centerCanvas();
+  keepInsideAllBalls();
 }
 
 // center the canvas element on the page
@@ -94,8 +118,6 @@ function centerCanvas() {
  
 function draw() {
   background(canvasBG);
-  
-  // clear the offscreen circular canvas
   circleG.clear();
   
   if (isVideoReady()) {
@@ -167,6 +189,10 @@ function draw() {
      }
   }
 
+  if (selectedBall !== -1) {
+    // after dragging we ensure inside bounds
+    keepInsideAllBalls();
+  }
   // draw balls INTO circleG
   drawBallsToGraphics(circleG);
 
@@ -196,6 +222,23 @@ function draw() {
     circle(indexPos.x, indexPos.y, INDEX_CIRCLE_RADIUS * 2);
     pop();
   }
+}
+
+// compute current (non‑pulsed) render radius for clamping
+function currentRenderRadius(b) {
+  if (b.suit) return b.radius * SUIT_SCALE;
+  if (b.isMirror) return b.radius * 2.5 * MIRROR_SCALE; // mirror draw radius
+  return b.radius;
+}
+
+function clampBallInside(b) {
+  const r = currentRenderRadius(b);
+  b.x = constrain(b.x, r + EDGE_MARGIN, width - (r + EDGE_MARGIN));
+  b.y = constrain(b.y, r + EDGE_MARGIN, height - (r + EDGE_MARGIN));
+}
+
+function keepInsideAllBalls() {
+  for (const b of balls) clampBallInside(b);
 }
 
 // update index finger position (center of moving circle)
@@ -242,7 +285,7 @@ function drawBallsToGraphics(g) {
     if (b.pulseStart == null) b.pulseStart = 0;
     if (b.wasInside == null) b.wasInside = false;
     
-    // only suits wiggle; circles stay static
+    // only suits wiggle; mirrors stay static
     let rx = 0, ry = 0;
     if (b.suit) {
       rx = (noise(b.noiseX + t * b.wiggleSpeed)) * 20 * b.wiggle; // increased multiplier
@@ -296,9 +339,65 @@ function drawBallsToGraphics(g) {
       }
     }
     
-    // plain circle: no wiggle, no pulse
-    g.circle(b.x + rx, b.y + ry, b.radius * 2);
+    // draw broken mirror image instead of circle
+    if (b.isMirror && b.mirrorIndex >= 0 && mirrorImgs[b.mirrorIndex]) {
+      g.push();
+      g.imageMode(CENTER);
+      const img = mirrorImgs[b.mirrorIndex];
+      g.tint(255, MIRROR_ALPHA); // make mirror a little transparent
+      const drawH = b.radius * 5 * MIRROR_SCALE; // scaled up
+      const drawW = drawH * (img.width / max(img.height, 1));
+      g.image(img, b.x, b.y, drawW, drawH);
+      g.noTint();
+      g.pop();
+    } else {
+      // fallback if mirror image missing
+      g.circle(b.x, b.y, b.radius * 2);
+    }
   }
 }
 
-// remove old drawBalls() function — use drawBallsToGraphics() instead
+function effectiveRadius(b) {
+  if (b.suit) return b.baseRadius * SUIT_SCALE;
+  if (b.isMirror) return (b.baseRadius * 5 * MIRROR_SCALE) * 0.5; // drawH is diameter
+  return b.baseRadius;
+}
+
+function circleOverlapArea(r1, r2, d) {
+  if (d >= r1 + r2) return 0;
+  if (d <= abs(r1 - r2)) return PI * pow(min(r1, r2), 2);
+  const alpha = acos((d*d + r1*r1 - r2*r2)/(2*d*r1));
+  const beta  = acos((d*d + r2*r2 - r1*r1)/(2*d*r2));
+  return r1*r1*alpha + r2*r2*beta - 0.5*sqrt( max(0, (-d + r1 + r2)*(d + r1 - r2)*(d - r1 + r2)*(d + r1 + r2)) );
+}
+
+function overlapFraction(b1, b2) {
+  const r1 = effectiveRadius(b1);
+  const r2 = effectiveRadius(b2);
+  const d = dist(b1.x, b1.y, b2.x, b2.y);
+  const area = circleOverlapArea(r1, r2, d);
+  const minArea = PI * pow(min(r1, r2), 2);
+  return minArea === 0 ? 0 : area / minArea;
+}
+
+function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
+  for (let i = 0; i < balls.length; i++) {
+    const b = balls[i];
+    let attempts = 0;
+    while (attempts < attemptsPerBall) {
+      let tooMuch = false;
+      for (let j = 0; j < i; j++) {
+        const other = balls[j];
+        if (overlapFraction(b, other) > maxFrac) {
+          tooMuch = true;
+          break;
+        }
+      }
+      if (!tooMuch) break;
+      // reposition
+      b.x = random(width * 0.1, width * 0.9);
+      b.y = random(height * 0.1, height * 0.9);
+      attempts++;
+    }
+  }
+}
