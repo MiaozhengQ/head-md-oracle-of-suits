@@ -6,6 +6,13 @@ let bodyImage;
 let assImage;
 let legLeftImage;
 let legRightImage;
+let armLeftImage;  // 左臂图片
+let armRightImage; // 新增：右臂图片
+
+let armLengths = {
+  left: null,
+  right: null
+};
 
 // remove per-hand counters; add presence detection timers
 // let leftHandCount = 0;
@@ -32,6 +39,8 @@ function preload() {
   // load leg images (place leg-left.png / leg-right.png in assets)
   legLeftImage = loadImage('assets/leg-left.png');
   legRightImage = loadImage('assets/leg-right.png');
+  armLeftImage = loadImage('assets/arm-left.png');
+  armRightImage = loadImage('assets/arm-right.png'); // 新增：加载右臂图片
 }
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -224,13 +233,29 @@ function drawAvatar(landmarks, gesture) {
   if (lHip) drawLegImage(legLeftImage, lHip, lKnee, lAnkle);
   if (rHip) drawLegImage(legRightImage, rHip, rKnee, rAnkle);
 
+  // 绘制手臂（在身体之前，所以手臂在身体后面）
+  if (lShoulder && lWrist && armLeftImage) {
+    drawArmImage(armLeftImage, lShoulder, lWrist, { mirrorX: true, side: 'left' });
+  } else if (lShoulder && lElbow && lWrist) {
+    drawLimb(lShoulder, lElbow, lWrist);
+  } else if (lShoulder && lElbow) {
+    drawLimb(lShoulder, lElbow, null);
+  }
+
+  // 右臂：使用 arm-right
+  if (rShoulder && rWrist && armRightImage) {
+    drawArmImage(armRightImage, rShoulder, rWrist, { mirrorX: false, side: 'right' });
+  } else if (rShoulder && rElbow && rWrist) {
+    drawLimb(rShoulder, rElbow, rWrist);
+  } else if (rShoulder && rElbow) {
+    drawLimb(rShoulder, rElbow, null);
+  }
+
   // --- replace torso quad with body image when available ---
   if (lShoulder && rShoulder && lHip && rHip) {
-    // compute center between shoulders+hips
     const centerX = (lShoulder.x + rShoulder.x + lHip.x + rHip.x) / 4;
-    // move body downward: use a fraction of shoulder width so offset scales with person size
     const baseCenterY = (lShoulder.y + rShoulder.y + lHip.y + rHip.y) / 4;
-    const BODY_Y_OFFSET = p5.Vector.dist(lShoulder, rShoulder) * -0.45; // increase to move further down
+    const BODY_Y_OFFSET = p5.Vector.dist(lShoulder, rShoulder) * -0.1; // 正值=向下，小幅下移
     const centerY = baseCenterY + BODY_Y_OFFSET;
 
     // width ~ shoulder distance scaled, height ~ distance between shoulder-mid and hip-mid
@@ -282,36 +307,35 @@ function drawAvatar(landmarks, gesture) {
   // draw head using shoulder width to estimate size (kept as before)
   if (nose && lShoulder && rShoulder) {
     const shoulderDist = p5.Vector.dist(lShoulder, rShoulder);
+    const headRadius = shoulderDist * 0.9;
+    const headScaleMultiplier = 1.15;      // overall size (height basis)
+    const headWidthMultiplier = 1.6;       // widen head (increase this)
 
-    // 颈部参考点
+    // image size
+    const imgH = headRadius * 2 * headScaleMultiplier;
+    const imgW = headRadius * 2 * headScaleMultiplier * headWidthMultiplier;
+
+    // compute neck pivot from shoulders (midpoint) and small upward offset
     const midShoulder = createVector((lShoulder.x + rShoulder.x) / 2, (lShoulder.y + rShoulder.y) / 2);
-    const NECK_UP = shoulderDist * 0.08;
-    const offsetMult = -0.14;
+    const NECK_UP = shoulderDist * 0.08; // tune to move pivot slightly up
+    // reduce left shift to move head slightly to the right
+    const offsetMult = -0.14; // smaller negative => head moves right relative to previous
     const pivotX = midShoulder.x - shoulderDist * offsetMult;
-    const HEAD_DOWN = shoulderDist * 0.22;
+    // move head down a little by adding a positive downward offset (tweak HEAD_DOWN multiplier)
+    const HEAD_DOWN = shoulderDist * 1.3;
     const pivotY = midShoulder.y - NECK_UP + HEAD_DOWN;
 
+    // compute head rotation angle (falls back to shoulders)
     const headAngle = getHeadAngle(landmarks);
 
-    // 根据肩宽动态缩放头部，与身体变化保持一致
-    let imgW, imgH;
-    if (headImage) {
-      const HEAD_SCALE = 1.8; // 相对于肩宽的缩放比例（可调整）
-      imgH = shoulderDist * HEAD_SCALE;
-      imgW = imgH * (headImage.width / max(headImage.height, 1)); // 保持原始宽高比
-    } else {
-      // 没有图片时的占位大小
-      imgW = shoulderDist;
-      imgH = shoulderDist;
-    }
-
+    // draw head image rotated around its bottom center (pivot at neck)
     push();
     imageMode(CENTER);
     translate(pivotX, pivotY);
-    rotate(headAngle + PI);
+    rotate(headAngle + PI); // keep +PI if image asset needs that correction
     if (headImage) {
-      // 让图片底边落在颈部枢轴
-      image(headImage, 0, -imgH / 2, imgW, imgH);
+      // draw image so its bottom edge sits at pivot (y = -imgH/2)
+      image(headImage, 0, -imgH * 0.8, imgW, imgH);
     } else {
       noStroke();
       fill(240);
@@ -341,58 +365,56 @@ function drawAvatar(landmarks, gesture) {
     }
   }
 
-  // arms: shoulder -> elbow -> wrist
-  if (lShoulder && lElbow && lWrist) drawLimb(lShoulder, lElbow, lWrist);
-  else if (lShoulder && lElbow) drawLimb(lShoulder, lElbow, null);
+  // 左臂图片绘制（肩->腕）
+  function drawArmImage(img, shoulder, wrist, opts = {}) {
+    if (!img || !shoulder || !wrist) return;
+    const ang = atan2(wrist.y - shoulder.y, wrist.x - shoulder.x);
+    const len = p5.Vector.dist(shoulder, wrist);
 
-  if (rShoulder && rElbow && rWrist) drawLimb(rShoulder, rElbow, rWrist);
-  else if (rShoulder && rElbow) drawLimb(rShoulder, rElbow, null);
+    const side = opts.side || 'left';
+    const SMOOTH_FACTOR = 0.13;
 
-  // legs: hip -> knee -> ankle
-  // draw legs using images if available, otherwise fallback to drawLimb
-  function drawLegImage(img, hip, knee, ankle) {
-    if (!hip) return;
-    const end = ankle ? ankle : (knee ? knee : hip);
-    const start = hip;
-    const len = p5.Vector.dist(start, end);
-    const cx = (start.x + end.x) / 2;
-    const cy = (start.y + end.y) / 2;
-    let ang = atan2(end.y - start.y, end.x - start.x);
-
-    // adjustments: smaller & rotation correction (tweak if needed)
-    const LEG_SCALE = 0.6;
-    const ROTATION_CORRECTION = -HALF_PI;
-    const ORIENT_BY_WIDTH = false;
-
-    if (img) {
-      let imgW, imgH;
-      const aspect = img.width / max(img.height, 1);
-      if (ORIENT_BY_WIDTH) {
-        imgW = max(len * LEG_SCALE, 8);
-        imgH = imgW / max(aspect, 0.0001);
-      } else {
-        imgH = max(len * LEG_SCALE, 8);
-        imgW = imgH * aspect;
-      }
-      push();
-      translate(cx, cy);
-      rotate(ang + ROTATION_CORRECTION);
-      imageMode(CENTER);
-      image(img, 0, 0, imgW, imgH);
-      pop();
+    if (armLengths[side] === null) {
+      armLengths[side] = len;
     } else {
-      drawLimb(start, knee ? knee : end, ankle ? ankle : null);
+      armLengths[side] = lerp(armLengths[side], len, SMOOTH_FACTOR);
     }
+
+    const mirrorX = !!opts.mirrorX;
+    const ARM_LENGTH_MULT = 1.00;
+    const ARM_WIDTH_MULT  = 1.10;
+    const ROTATION_CORRECTION = opts.side === 'right' 
+      ? -HALF_PI * 0.7  // 右臂旋转角度
+      : -HALF_PI * 0.4; // 左臂旋转角度
+    const ARM_FORWARD_OFFSET = -2;
+    const ARM_OUTWARD_OFFSET = -5;
+    // 左右臂使用不同的垂直偏移
+    const ARM_VERTICAL_SHIFT = opts.side === 'right' 
+      ? 11  // 右臂向上移动（更小的正值）
+      : 22; // 左臂保持原位置
+
+    let cx = (shoulder.x + wrist.x) / 2;
+    let cy = (shoulder.y + wrist.y) / 2;
+    cx += cos(ang + HALF_PI) * ARM_OUTWARD_OFFSET;
+    cy += sin(ang + HALF_PI) * ARM_OUTWARD_OFFSET;
+    cx += cos(ang) * ARM_FORWARD_OFFSET;
+    cy += sin(ang) * ARM_FORWARD_OFFSET;
+    cy += ARM_VERTICAL_SHIFT;
+
+    const imgH = max(armLengths[side] * ARM_LENGTH_MULT, 8);
+    const aspect = img.width / max(img.height, 1);
+    const imgW = imgH * aspect * ARM_WIDTH_MULT;
+
+    push();
+    translate(cx, cy);
+    rotate(ang + ROTATION_CORRECTION);
+    imageMode(CENTER);
+    image(img, 0, 0, imgW, imgH);
+    pop();
   }
 
-  // left leg (use left leg image if loaded)
-  if (lHip) {
-    drawLegImage(legLeftImage, lHip, lKnee, lAnkle);
-  }
-  // right leg
-  if (rHip) {
-    drawLegImage(legRightImage, rHip, rKnee, rAnkle);
-  }
+  // arms: shoulder -> elbow -> wrist
+  
 
   pop();
 }
@@ -433,6 +455,32 @@ function getHeadAngle(landmarks) {
       const bx = landmarks[b].x * width;
       const by = landmarks[b].y * height;
       return atan2(by - ay, bx - ax);
+            // 减小头旋转幅度（0.5 = 旋转50%，越小越稳定）
+            //     const ROTATION_DAMPING = 0.2            // helper: compute head rotation angle from available face landmarks (tries ears, eyes, then falls back to shoulders)
+            function getHeadAngle(landmarks) {
+              // candidate index pairs: [left, right]
+              const pairs = [
+                [7, 8],  // leftEar, rightEar (best)
+                [3, 6],  // leftEyeOuter, rightEyeOuter
+                [2, 5],  // leftEye, rightEye
+                [1, 4],  // leftEyeInner, rightEyeInner
+                [11, 12] // leftShoulder, rightShoulder (fallback)
+              ];
+              for (let [a, b] of pairs) {
+                if (landmarks[a] && landmarks[b]) {
+                  const ax = landmarks[a].x * width;
+                  const ay = landmarks[a].y * height;
+                  const bx = landmarks[b].x * width;
+                  const by = landmarks[b].y * height;
+                  const rawAngle = atan2(by - ay, bx - ax);
+                  // 减小头旋转幅度（0.2 = 旋转20%，越小越稳定）
+                  const ROTATION_DAMPING = 0.1;
+                  return rawAngle * ROTATION_DAMPING;
+                }
+              }
+              return 0;
+            };
+     return rawAngle * ROTATION_DAMPING;
     }
   }
   return 0;
