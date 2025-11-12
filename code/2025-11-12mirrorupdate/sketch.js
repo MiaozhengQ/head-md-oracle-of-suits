@@ -6,7 +6,8 @@ let bodyImage;
 let assImage;
 let legLeftImage;
 let legRightImage;
-let armLeftImage; // 新增：左臂图片
+let armLeftImage;  // 左臂图片
+let armRightImage; // 新增：右臂图片
 
 let armLengths = {
   left: null,
@@ -38,7 +39,8 @@ function preload() {
   // load leg images (place leg-left.png / leg-right.png in assets)
   legLeftImage = loadImage('assets/leg-left.png');
   legRightImage = loadImage('assets/leg-right.png');
-  armLeftImage = loadImage('assets/arm-left.png'); // 新增：加载左臂图片
+  armLeftImage = loadImage('assets/arm-left.png');
+  armRightImage = loadImage('assets/arm-right.png'); // 新增：加载右臂图片
 }
 function setup() {
   createCanvas(windowWidth, windowHeight);
@@ -240,8 +242,14 @@ function drawAvatar(landmarks, gesture) {
     drawLimb(lShoulder, lElbow, null);
   }
 
-  if (rShoulder && rElbow && rWrist) drawLimb(rShoulder, rElbow, rWrist);
-  else if (rShoulder && rElbow) drawLimb(rShoulder, rElbow, null);
+  // 右臂：使用 arm-right
+  if (rShoulder && rWrist && armRightImage) {
+    drawArmImage(armRightImage, rShoulder, rWrist, { mirrorX: false, side: 'right' });
+  } else if (rShoulder && rElbow && rWrist) {
+    drawLimb(rShoulder, rElbow, rWrist);
+  } else if (rShoulder && rElbow) {
+    drawLimb(rShoulder, rElbow, null);
+  }
 
   // --- replace torso quad with body image when available ---
   if (lShoulder && rShoulder && lHip && rHip) {
@@ -364,9 +372,8 @@ function drawAvatar(landmarks, gesture) {
     const len = p5.Vector.dist(shoulder, wrist);
 
     const side = opts.side || 'left';
-    const SMOOTH_FACTOR = 0.13; // 平滑因子（0-1，越小越平滑）
+    const SMOOTH_FACTOR = 0.13;
 
-    // 初始化与平滑处理长度
     if (armLengths[side] === null) {
       armLengths[side] = len;
     } else {
@@ -376,10 +383,15 @@ function drawAvatar(landmarks, gesture) {
     const mirrorX = !!opts.mirrorX;
     const ARM_LENGTH_MULT = 1.00;
     const ARM_WIDTH_MULT  = 1.10;
-    const ROTATION_CORRECTION = -HALF_PI*0.4;
+    const ROTATION_CORRECTION = opts.side === 'right' 
+      ? -HALF_PI * 0.7  // 右臂旋转角度
+      : -HALF_PI * 0.4; // 左臂旋转角度
     const ARM_FORWARD_OFFSET = -2;
-    const ARM_OUTWARD_OFFSET = -10; // 水平左移（更负 = 更向左）
-    const ARM_VERTICAL_SHIFT = 22;
+    const ARM_OUTWARD_OFFSET = -5;
+    // 左右臂使用不同的垂直偏移
+    const ARM_VERTICAL_SHIFT = opts.side === 'right' 
+      ? 11  // 右臂向上移动（更小的正值）
+      : 22; // 左臂保持原位置
 
     let cx = (shoulder.x + wrist.x) / 2;
     let cy = (shoulder.y + wrist.y) / 2;
@@ -389,7 +401,7 @@ function drawAvatar(landmarks, gesture) {
     cy += sin(ang) * ARM_FORWARD_OFFSET;
     cy += ARM_VERTICAL_SHIFT;
 
-    const imgH = max(armLengths[side] * ARM_LENGTH_MULT, 8); // 使用平滑后的长度
+    const imgH = max(armLengths[side] * ARM_LENGTH_MULT, 8);
     const aspect = img.width / max(img.height, 1);
     const imgW = imgH * aspect * ARM_WIDTH_MULT;
 
