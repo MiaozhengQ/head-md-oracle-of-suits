@@ -1,5 +1,6 @@
 let img, frameImg, maskedImg, maskImg;
 let firstpiece; // 新增：要画到 back-board 上的“房子”图片
+let secondpiece; // 新增：secondpiece
 let imagesReady = false;
 
 let w, h; // mask/frame 大小
@@ -10,6 +11,7 @@ function preload() {
   img = loadImage('assets/back-board.png');
   frameImg = loadImage('assets/frame.png'); // 用作蒙版并叠加显示
   firstpiece = loadImage('assets/firstpiece.png'); // 新增：房子图片
+  secondpiece = loadImage('assets/secondpiece.png'); // 新增：secondpiece
 }
 
 function setup() {
@@ -190,6 +192,11 @@ function draw() {
 
     // 将 firstpiece 绘制到临时 graphics（在 mask 作用下，只有可见区域会显示）
     g.image(firstpiece, fpX, fpY, fpW, fpH);
+
+    // 若有 secondpiece，则按与 firstpiece 相同的尺寸与位置（居中）绘制
+    if (secondpiece && secondpiece.width > 0) {
+      g.image(secondpiece, fpX, fpY, fpW, fpH);
+    }
   }
 
   let temp = g.get();
