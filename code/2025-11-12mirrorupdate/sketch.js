@@ -233,9 +233,25 @@ function drawAvatar(landmarks, gesture) {
   if (lHip) drawLegImage(legLeftImage, lHip, lKnee, lAnkle);
   if (rHip) drawLegImage(legRightImage, rHip, rKnee, rAnkle);
 
+  // compute body scale used for arms so proportions match body image
+  let bodyScaleForArms = 1.4; // fallback
+  if (lShoulder && rShoulder && lHip && rHip) {
+    const shoulderDist = p5.Vector.dist(lShoulder, rShoulder);
+    const midShoulder = createVector((lShoulder.x + rShoulder.x) / 2, (lShoulder.y + rShoulder.y) / 2);
+    const midHip = createVector((lHip.x + rHip.x) / 2, (lHip.y + rHip.y) / 2);
+    const torsoHeight = p5.Vector.dist(midShoulder, midHip);
+    // body uses: imgW = shoulderDist*1.4; imgH = max(torsoHeight*1.4, imgW*1.1)
+    // derive the same height scale for arms:
+    const scaleH = 1.4;
+    const scaleFromWidth = (shoulderDist * 1.4 * 1.1) / max(torsoHeight, 1);
+    bodyScaleForArms = max(scaleH, scaleFromWidth);
+  }
+
   // 绘制手臂（在身体之前，所以手臂在身体后面）
   if (lShoulder && lWrist && armLeftImage) {
-    drawArmImage(armLeftImage, lShoulder, lWrist, { mirrorX: true, side: 'left' });
+    drawArmImage(armLeftImage, lShoulder, lWrist, {
+      mirrorX: true, side: 'left', bodyScale: bodyScaleForArms, armScale: 0.8
+    });
   } else if (lShoulder && lElbow && lWrist) {
     drawLimb(lShoulder, lElbow, lWrist);
   } else if (lShoulder && lElbow) {
@@ -244,7 +260,9 @@ function drawAvatar(landmarks, gesture) {
 
   // 右臂：使用 arm-right
   if (rShoulder && rWrist && armRightImage) {
-    drawArmImage(armRightImage, rShoulder, rWrist, { mirrorX: false, side: 'right' });
+    drawArmImage(armRightImage, rShoulder, rWrist, {
+      mirrorX: false, side: 'right', bodyScale: bodyScaleForArms, armScale: 0.8
+    });
   } else if (rShoulder && rElbow && rWrist) {
     drawLimb(rShoulder, rElbow, rWrist);
   } else if (rShoulder && rElbow) {
@@ -381,17 +399,20 @@ function drawAvatar(landmarks, gesture) {
     }
 
     const mirrorX = !!opts.mirrorX;
-    const ARM_LENGTH_MULT = 1.00;
+    // match body scale so arm length scales with body size
+    const ARM_LENGTH_MULT = opts.bodyScale != null ? opts.bodyScale : 1.0;
     const ARM_WIDTH_MULT  = 1.10;
+    // extra overall scale for the arm image ( <1 缩小, >1 放大 )
+    const ARM_SIZE_MULT   = opts.armScale != null ? opts.armScale : 0.35;
+
     const ROTATION_CORRECTION = opts.side === 'right' 
-      ? -HALF_PI * 0.7  // 右臂旋转角度
-      : -HALF_PI * 0.4; // 左臂旋转角度
+      ? -HALF_PI * 0.7
+      : -HALF_PI * 0.4;
     const ARM_FORWARD_OFFSET = -2;
     const ARM_OUTWARD_OFFSET = -5;
-    // 左右臂使用不同的垂直偏移
     const ARM_VERTICAL_SHIFT = opts.side === 'right' 
-      ? 11  // 右臂向上移动（更小的正值）
-      : 22; // 左臂保持原位置
+      ? 11
+      : 22;
 
     let cx = (shoulder.x + wrist.x) / 2;
     let cy = (shoulder.y + wrist.y) / 2;
@@ -401,7 +422,7 @@ function drawAvatar(landmarks, gesture) {
     cy += sin(ang) * ARM_FORWARD_OFFSET;
     cy += ARM_VERTICAL_SHIFT;
 
-    const imgH = max(armLengths[side] * ARM_LENGTH_MULT, 8);
+    const imgH = max(armLengths[side] * ARM_LENGTH_MULT * ARM_SIZE_MULT, 8);
     const aspect = img.width / max(img.height, 1);
     const imgW = imgH * aspect * ARM_WIDTH_MULT;
 
