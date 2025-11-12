@@ -244,17 +244,21 @@ function drawAvatar(landmarks, gesture) {
     const midShoulder = createVector((lShoulder.x + rShoulder.x) / 2, (lShoulder.y + rShoulder.y) / 2);
     const midHip = createVector((lHip.x + rHip.x) / 2, (lHip.y + rHip.y) / 2);
     const torsoHeight = p5.Vector.dist(midShoulder, midHip);
-    // body uses: imgW = shoulderDist*1.4; imgH = max(torsoHeight*1.4, imgW*1.1)
-    // derive the same height scale for arms:
     const scaleH = 1.4;
     const scaleFromWidth = (shoulderDist * 1.4 * 1.1) / max(torsoHeight, 1);
     bodyScaleForArms = max(scaleH, scaleFromWidth);
   }
 
+  // 躯干中心（肩中点），用于把手臂往内收
+  const torsoCenter = (lShoulder && rShoulder)
+    ? createVector((lShoulder.x + rShoulder.x) / 2, (lShoulder.y + rShoulder.y) / 2)
+    : null;
+
   // 绘制手臂（在身体之前，所以手臂在身体后面）
   if (lShoulder && lWrist && armLeftImage) {
     drawArmImage(armLeftImage, lShoulder, lWrist, {
-      mirrorX: true, side: 'left', bodyScale: bodyScaleForArms, armScale: 0.8
+      side: 'left', bodyScale: bodyScaleForArms, armScale: 0.3,
+      torsoCenter, inwardShift: 14, pivotInset: 12
     });
   } else if (lShoulder && lElbow && lWrist) {
     drawLimb(lShoulder, lElbow, lWrist);
@@ -262,10 +266,10 @@ function drawAvatar(landmarks, gesture) {
     drawLimb(lShoulder, lElbow, null);
   }
 
-  // 右臂：使用 arm-right
   if (rShoulder && rWrist && armRightImage) {
     drawArmImage(armRightImage, rShoulder, rWrist, {
-      mirrorX: false, side: 'right', bodyScale: bodyScaleForArms, armScale: 0.8
+      side: 'right', bodyScale: bodyScaleForArms, armScale: 0.3,
+      torsoCenter, inwardShift: 14, pivotInset: 18
     });
   } else if (rShoulder && rElbow && rWrist) {
     drawLimb(rShoulder, rElbow, rWrist);
@@ -273,15 +277,15 @@ function drawAvatar(landmarks, gesture) {
     drawLimb(rShoulder, rElbow, null);
   }
 
-  // 手：在手臂之后，身体之前
-  if (lWrist && handLeftImage) {
-    drawHandImage(handLeftImage, lWrist, {
-      mirrorX: true, side: 'left', bodyScale: bodyScaleForArms, handScale: 0.8
+  // 手：初始化位置与旋转（贴在手腕处，沿肘→腕方向，无偏移/校正）
+  if (lElbow && lWrist && handLeftImage) {
+    drawHandImage(handLeftImage, lElbow, lWrist, {
+      side: 'left', bodyScale: bodyScaleForArms, handScale: 1.0
     });
   }
-  if (rWrist && handRightImage) {
-    drawHandImage(handRightImage, rWrist, {
-      mirrorX: false, side: 'right', bodyScale: bodyScaleForArms, handScale: 0.8
+  if (rElbow && rWrist && handRightImage) {
+    drawHandImage(handRightImage, rElbow, rWrist, {
+      side: 'right', bodyScale: bodyScaleForArms, handScale: 1.0
     });
   }
 
@@ -399,44 +403,46 @@ function drawAvatar(landmarks, gesture) {
     }
   }
 
-  // 左臂图片绘制（肩->腕）
+  // 左臂图片绘制（肩->腕）— 初始化位置与旋转
   function drawArmImage(img, shoulder, wrist, opts = {}) {
     if (!img || !shoulder || !wrist) return;
     const ang = atan2(wrist.y - shoulder.y, wrist.x - shoulder.x);
     const len = p5.Vector.dist(shoulder, wrist);
 
     const side = opts.side || 'left';
-    const SMOOTH_FACTOR = 0.13;
+    const SMOOTH_FACTOR = 0.15;
+    if (armLengths[side] === null) armLengths[side] = len;
+    else armLengths[side] = lerp(armLengths[side], len, SMOOTH_FACTOR);
 
-    if (armLengths[side] === null) {
-      armLengths[side] = len;
-    } else {
-      armLengths[side] = lerp(armLengths[side], len, SMOOTH_FACTOR);
-    }
+    const ARM_LENGTH_MULT = (opts.bodyScale != null ? opts.bodyScale : 1.0);
+    const ARM_WIDTH_MULT  = 1.0;
+    const ARM_SIZE_MULT   = (opts.armScale != null ? opts.armScale : 1.0);
 
-    const mirrorX = !!opts.mirrorX;
-    // match body scale so arm length scales with body size
-    const ARM_LENGTH_MULT = opts.bodyScale != null ? opts.bodyScale : 1.0;
-    const ARM_WIDTH_MULT  = 1.10;
-    // extra overall scale for the arm image ( <1 缩小, >1 放大 )
-    const ARM_SIZE_MULT   = opts.armScale != null ? opts.armScale : 0.35;
+    const ROTATION_CORRECTION = 0;
 
-    const ROTATION_CORRECTION = opts.side === 'right' 
-      ? -HALF_PI * 0.7
-      : -HALF_PI * 0.4;
-    const ARM_FORWARD_OFFSET = -2;
-    const ARM_OUTWARD_OFFSET = -5;
-    const ARM_VERTICAL_SHIFT = opts.side === 'right' 
-      ? 11
-      : 22;
-
+    // 以肩腕中点为中心
     let cx = (shoulder.x + wrist.x) / 2;
     let cy = (shoulder.y + wrist.y) / 2;
-    cx += cos(ang + HALF_PI) * ARM_OUTWARD_OFFSET;
-    cy += sin(ang + HALF_PI) * ARM_OUTWARD_OFFSET;
-    cx += cos(ang) * ARM_FORWARD_OFFSET;
-    cy += sin(ang) * ARM_FORWARD_OFFSET;
-    cy += ARM_VERTICAL_SHIFT;
+
+    // 往身体中心内收（已有）
+    if (opts.torsoCenter) {
+      const toCenter = p5.Vector.sub(opts.torsoCenter, createVector(cx, cy));
+      const d = toCenter.mag();
+      if (d > 0.0001) {
+        toCenter.mult((opts.inwardShift != null ? opts.inwardShift : 12) / d);
+        cx += toCenter.x; cy += toCenter.y;
+      }
+    }
+
+    // 沿手臂方向向肩部靠近（各自旋转中心）
+    if (opts.pivotInset && opts.pivotInset !== 0) {
+      const toShoulder = p5.Vector.sub(shoulder, createVector(cx, cy));
+      const m = toShoulder.mag();
+      if (m > 0.0001) {
+        toShoulder.mult(opts.pivotInset / m);
+        cx += toShoulder.x; cy += toShoulder.y;
+      }
+    }
 
     const imgH = max(armLengths[side] * ARM_LENGTH_MULT * ARM_SIZE_MULT, 8);
     const aspect = img.width / max(img.height, 1);
@@ -450,52 +456,29 @@ function drawAvatar(landmarks, gesture) {
     pop();
   }
 
-  // 手部图像绘制（腕->指尖）
-  function drawHandImage(img, wrist, opts = {}) {
+  // 手部图像绘制（肘->腕 定向，中心在腕部），无额外偏移/旋转校正
+  function drawHandImage(img, elbow, wrist, opts = {}) {
     if (!img || !wrist) return;
-    const ang = atan2(wrist.y - wrist.y, wrist.x - wrist.x);
-    const len = 50; // 手部图像固定长度
-
     const side = opts.side || 'left';
-    const SMOOTH_FACTOR = 0.13;
+    const bodyScale = opts.bodyScale != null ? opts.bodyScale : 1.0;
+    const handScale = opts.handScale != null ? opts.handScale : 1.0;
 
-    if (armLengths[side] === null) {
-      armLengths[side] = len;
-    } else {
-      armLengths[side] = lerp(armLengths[side], len, SMOOTH_FACTOR);
-    }
-
-    const mirrorX = !!opts.mirrorX;
-    // match body scale so hand length scales with body size
-    const HAND_LENGTH_MULT = opts.bodyScale != null ? opts.bodyScale : 1.0;
-    const HAND_WIDTH_MULT  = 1.10;
-    // extra overall scale for the hand image ( <1 缩小, >1 放大 )
-    const HAND_SIZE_MULT   = opts.handScale != null ? opts.handScale : 0.35;
-
-    const ROTATION_CORRECTION = opts.side === 'right' 
-      ? -HALF_PI * 0.7
-      : -HALF_PI * 0.4;
-    const HAND_FORWARD_OFFSET = -2;
-    const HAND_OUTWARD_OFFSET = -5;
-    const HAND_VERTICAL_SHIFT = opts.side === 'right' 
-      ? 11
-      : 22;
-
-    let cx = wrist.x;
-    let cy = wrist.y;
-    cx += cos(ang + HALF_PI) * HAND_OUTWARD_OFFSET;
-    cy += sin(ang + HALF_PI) * HAND_OUTWARD_OFFSET;
-    cx += cos(ang) * HAND_FORWARD_OFFSET;
-    cy += sin(ang) * HAND_FORWARD_OFFSET;
-    cy += HAND_VERTICAL_SHIFT;
-
-    const imgH = max(armLengths[side] * HAND_LENGTH_MULT * HAND_SIZE_MULT, 8);
+    const ang = elbow ? atan2(wrist.y - elbow.y, wrist.x - elbow.x) : 0;
+    const forearmLen = elbow ? p5.Vector.dist(elbow, wrist) : 60;
+    const HAND_LENGTH_MULT = 0.55;
+    const imgH = max(forearmLen * HAND_LENGTH_MULT * bodyScale * handScale, 12);
     const aspect = img.width / max(img.height, 1);
-    const imgW = imgH * aspect * HAND_WIDTH_MULT;
+    const imgW = imgH * aspect;
+
+    // 本地偏移：FWD 沿手方向（+x），OUT 垂直手方向（+y）
+    const FWD = opts.handFwd != null ? opts.handFwd : 100;         // 往前/往后（沿手方向）
+    const OUT = (opts.handOut != null ? opts.handOut :-12)       // 向外（垂直手方向）
+              * (side === 'left' ? 1 : -1);                      // 右手外侧相反
 
     push();
-    translate(cx, cy);
-    rotate(ang + ROTATION_CORRECTION);
+    translate(wrist.x, wrist.y);  // 以腕为旋转中心
+    rotate(ang);                  // 对齐前臂方向
+    translate(FWD, OUT);         // 沿自身旋转后的坐标系外移
     imageMode(CENTER);
     image(img, 0, 0, imgW, imgH);
     pop();
@@ -530,7 +513,7 @@ function getHeadAngle(landmarks) {
     [7, 8],  // leftEar, rightEar (best)
     [3, 6],  // leftEyeOuter, rightEyeOuter
     [2, 5],  // leftEye, rightEye
-    [1, 4],  // leftEyeInner, rightEyeInnerz
+    [1, 4],  // leftEyeInner, rightEyeInner
     [11, 12] // leftShoulder, rightShoulder (fallback)
   ];
   for (let [a, b] of pairs) {
