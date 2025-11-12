@@ -296,7 +296,7 @@ function drawAvatar(landmarks, gesture) {
     const offsetMult = -0.14; // smaller negative => head moves right relative to previous
     const pivotX = midShoulder.x - shoulderDist * offsetMult;
     // move head down a little by adding a positive downward offset (tweak HEAD_DOWN multiplier)
-    const HEAD_DOWN = shoulderDist * 0.48;
+    const HEAD_DOWN = shoulderDist * 0.98;
     const pivotY = midShoulder.y - NECK_UP + HEAD_DOWN;
 
     // compute head rotation angle (falls back to shoulders)
