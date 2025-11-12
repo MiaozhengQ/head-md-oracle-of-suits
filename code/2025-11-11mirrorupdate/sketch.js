@@ -439,7 +439,7 @@ function getHeadAngle(landmarks) {
 // redirect state — use path relative to the web server root (NOT an OS filesystem path)
 let redirectDone = false;
 // Example: if you serve the project root with a local server, use a relative URL:
-const FINGER_SCENE_URL = 'http://127.0.0.1:5500/code/2025-11-10-brokenmirror/FingerPaint/index.html'; // adjust if different
+const FINGER_SCENE_URL = 'http://127.0.0.1:5500/code/2025-11-11-replacemirror/FingerPaint/index.html'; // adjust if different
 
 function draw() {
   // presence = detectable pose landmarks exist for a continuous period
