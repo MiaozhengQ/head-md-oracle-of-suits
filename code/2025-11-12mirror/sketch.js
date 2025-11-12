@@ -174,15 +174,15 @@ function draw() {
   // 去除调试预览
   temp.mask(maskImg); // mask 会修改 temp
 
-  // 将结果按比例缩放以适应窗口并居中显示（使用 mask 的尺寸 w,h）  // 将结果按比例缩放以适应窗口并居中显示（使用 mask 的尺寸 w,h）
-  const scaleToWindow = Math.min(width / w, height / h); / w, height / h);
-  const dw = w * scaleToWindow;  const dw = w * scaleToWindow;
+  // 将结果按比例缩放以适应窗口并居中显示（使用 mask 的尺寸 w,h）
+  const scaleToWindow = Math.min(width / w, height / h);
+  const dw = w * scaleToWindow;
   const dh = h * scaleToWindow;
   const dx = (width - dw) / 2;
   const dy = (height - dh) / 2;
 
   image(temp, dx, dy, dw, dh);
 
-  // 叠加原始 frame（保留边框视觉）  // 叠加原始 frame（保留边框视觉）
-  image(frameImg, dx, dy, dw, dh);dh);
+  // 叠加原始 frame（保留边框视觉）
+  image(frameImg, dx, dy, dw, dh);
 }
