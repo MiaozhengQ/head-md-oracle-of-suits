@@ -20,6 +20,11 @@ const SUIT_SCALE = 1.8;
 const MIRROR_SCALE = 2.2;
 const MIRROR_ALPHA = 180;
 const EDGE_MARGIN = 20; // minimum distance from any image edge to canvas border
+// snap settings
+const SNAP_HOLD_FRAMES = 30;   // how many consecutive frames inside mask before snapping
+const SNAP_LERP = 0.15;        // how fast the suit moves to the target
+const TARGET_PAD = 80;         // padding from edges for slot positions
+let suitTargets = {};          // computed target positions for each suit
 
 function preload() {
   // put diamond.png, club.png, heart.png, spade.png in an "assets" folder next to this sketch
@@ -47,6 +52,22 @@ const DEPTH_THRESHOLD = 0.08;        // z-delta required to consider "approach" 
 const PICK_RADIUS = 140;             // px radius to search nearest ball when approach happens
 const RELEASE_DEPTH_FACTOR = 0.5;    // fraction of DEPTH_THRESHOLD below which to release
 
+function initSuitTargets() {
+  // keep targets safely inside canvas
+  const leftX   = EDGE_MARGIN + TARGET_PAD;
+  const rightX  = width - (EDGE_MARGIN + TARGET_PAD);
+  const topY    = EDGE_MARGIN + TARGET_PAD;
+  const bottomY = height - (EDGE_MARGIN - TARGET_PAD);
+  const midX = width / 2;
+  const midY = height / 2;
+  suitTargets = {
+    diamond: { x: midX,  y: topY },    // top-center
+    club:    { x: rightX, y: midY },   // right-center
+    heart:   { x: midX,  y: bottomY }, // bottom-center
+    spade:   { x: leftX,  y: midY }    // left-center
+  };
+}
+
 function setup() {
   cnv = createCanvas(450, 580);
   centerCanvas();
@@ -60,6 +81,7 @@ function setup() {
   maskColor = color(150, 100, 200, 120); // tweak these values
   
   circleG = createGraphics(width, height);
+  initSuitTargets(); // compute snap targets based on current canvas size
   
   // shuffle suits so each appears exactly once
   const suitsPool = shuffle(['diamond', 'club', 'heart', 'spade']);
@@ -93,7 +115,13 @@ function setup() {
       lastTouched: 0,
       active: true,
       isMirror: suit === null,
-      mirrorIndex: mirrorIndex
+      mirrorIndex: mirrorIndex,
+      // snap state (suits only)
+      insideCount: 0,
+      snap: false,
+      locked: false,
+      targetX: suit ? suitTargets[suit].x : undefined,
+      targetY: suit ? suitTargets[suit].y : undefined
     });
   }
   balls.forEach(b => b.radius = b.baseRadius);
@@ -104,6 +132,14 @@ function setup() {
 function windowResized() {
   // reposition canvas to stay centered on window resize
   centerCanvas();
+  initSuitTargets();
+  // refresh target positions for suits
+  for (const b of balls) {
+    if (b.suit) {
+      b.targetX = suitTargets[b.suit].x;
+      b.targetY = suitTargets[b.suit].y;
+    }
+  }
   keepInsideAllBalls();
 }
 
@@ -190,9 +226,23 @@ function draw() {
   }
 
   if (selectedBall !== -1) {
-    // after dragging we ensure inside bounds
     keepInsideAllBalls();
   }
+
+  // check if any suit is inside the mask
+  let suitInsideMask = false;
+  if (indexPos) {
+    for (const b of balls) {
+      if (b.suit && dist(b.x, b.y, indexPos.x, indexPos.y) <= INDEX_CIRCLE_RADIUS) {
+        suitInsideMask = true;
+        break;
+      }
+    }
+  }
+
+  // change mask color to white if suit is inside, otherwise use original color
+  let currentMaskColor = suitInsideMask ? color(0, 0, 255, 200) : maskColor; // HSB: (0,0,255) = white
+
   // draw balls INTO circleG
   drawBallsToGraphics(circleG);
 
@@ -206,7 +256,7 @@ function draw() {
 
     // fill the clipped area with mask color BEFORE drawing content
     noStroke();
-    fill(maskColor);
+    fill(currentMaskColor);
     rect(0, 0, width, height);
 
     // draw the offscreen graphics (only visible inside circle)
@@ -278,6 +328,9 @@ function drawBallsToGraphics(g) {
   const now = millis();
   
   for (let b of balls) {
+    // skip rendering locked suits (they've exited the canvas)
+    if (b.locked) continue;
+    
     g.fill(b.color);
     const t = frameCount;
     
@@ -285,15 +338,45 @@ function drawBallsToGraphics(g) {
     if (b.pulseStart == null) b.pulseStart = 0;
     if (b.wasInside == null) b.wasInside = false;
     
-    // only suits wiggle; mirrors stay static
+    // only suits wiggle; mirrors stay static (unless locked, still allow small wiggle if you want)
     let rx = 0, ry = 0;
     if (b.suit) {
-      rx = (noise(b.noiseX + t * b.wiggleSpeed)) * 20 * b.wiggle; // increased multiplier
-      ry = (noise(b.noiseY + t * b.wiggleSpeed)) * 20 * b.wiggle;
+      const wig = b.locked ? 0.3 : 1; // reduce wiggle after locked, optional
+      rx = (noise(b.noiseX + t * b.wiggleSpeed)) * 20 * b.wiggle * wig;
+      ry = (noise(b.noiseY + t * b.wiggleSpeed)) * 20 * b.wiggle * wig;
     }
     
     // check if suit is inside the circle mask
     const inside = indexPos && dist(b.x, b.y, indexPos.x, indexPos.y) <= INDEX_CIRCLE_RADIUS;
+    
+    // snap logic: after staying inside for SNAP_HOLD_FRAMES, start moving outside canvas
+    if (b.suit && !b.locked) {
+      if (inside) {
+        b.insideCount = (b.insideCount || 0) + 1;
+        if (!b.snap && b.insideCount >= SNAP_HOLD_FRAMES) {
+          b.snap = true;
+          // set random exit direction (outside canvas)
+          const angle = random(TWO_PI);
+          const distance = 500; // how far outside to move
+          b.targetX = indexPos.x + cos(angle) * distance;
+          b.targetY = indexPos.y + sin(angle) * distance;
+        }
+      } else {
+        b.insideCount = 0;
+      }
+      if (b.snap && b.targetX != null && b.targetY != null) {
+        b.x = lerp(b.x, b.targetX, SNAP_LERP);
+        b.y = lerp(b.y, b.targetY, SNAP_LERP);
+        // lock when very close; also disable interaction
+        if (dist(b.x, b.y, b.targetX, b.targetY) < 5) {
+          b.x = b.targetX;
+          b.y = b.targetY;
+          b.locked = true;
+          b.active = false;
+          b.snap = false;
+        }
+      }
+    }
     
     // trigger pulse when entering the circle
     if (b.suit && inside && !b.wasInside) {
@@ -305,11 +388,11 @@ function drawBallsToGraphics(g) {
     
     // compute pulse multiplier (grows then settles)
     let pulseMul = 1;
-    const PULSE_DURATION = 1200; // ms — increased from 480 to 1200
+    const PULSE_DURATION = 1200; // ms
     if (b.suit && b.pulseStart && (now - b.pulseStart) < PULSE_DURATION) {
       const e = (now - b.pulseStart) / PULSE_DURATION; // 0..1
-      const ease = 1 - (1 - e) * (1 - e); // ease out quad
-      pulseMul = 1 + 1.2 * (1 - ease); // increased pulse intensity from 0.6 to 1.2
+      const ease = 1 - (1 - e) * (1 - e);
+      pulseMul = 1 + 1.2 * (1 - ease);
     } else if (b.suit && b.pulseStart && (now - b.pulseStart) >= PULSE_DURATION) {
       b.pulseStart = 0;
     }
@@ -317,7 +400,7 @@ function drawBallsToGraphics(g) {
     // flash alpha when inside
     let imgAlpha = 255;
     if (b.suit && inside) {
-      imgAlpha = 150 + floor(105 * (0.5 + 0.5 * sin(TWO_PI * (0.06 * t + b.noiseY)))); // slower flash
+      imgAlpha = 150 + floor(105 * (0.5 + 0.5 * sin(TWO_PI * (0.06 * t + b.noiseY))));
     }
     
     if (b.suit) {
@@ -344,14 +427,13 @@ function drawBallsToGraphics(g) {
       g.push();
       g.imageMode(CENTER);
       const img = mirrorImgs[b.mirrorIndex];
-      g.tint(255, MIRROR_ALPHA); // make mirror a little transparent
-      const drawH = b.radius * 5 * MIRROR_SCALE; // scaled up
+      g.tint(255, MIRROR_ALPHA);
+      const drawH = b.radius * 5 * MIRROR_SCALE;
       const drawW = drawH * (img.width / max(img.height, 1));
       g.image(img, b.x, b.y, drawW, drawH);
       g.noTint();
       g.pop();
     } else {
-      // fallback if mirror image missing
       g.circle(b.x, b.y, b.radius * 2);
     }
   }
