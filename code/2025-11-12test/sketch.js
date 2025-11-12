@@ -277,18 +277,6 @@ function drawAvatar(landmarks, gesture) {
     drawLimb(rShoulder, rElbow, null);
   }
 
-  // 手：初始化位置与旋转（贴在手腕处，沿肘→腕方向，无偏移/校正）
-  if (lElbow && lWrist && handLeftImage) {
-    drawHandImage(handLeftImage, lElbow, lWrist, {
-      side: 'left', bodyScale: bodyScaleForArms, handScale: 1.0
-    });
-  }
-  if (rElbow && rWrist && handRightImage) {
-    drawHandImage(handRightImage, rElbow, rWrist, {
-      side: 'right', bodyScale: bodyScaleForArms, handScale: 1.0
-    });
-  }
-
   // --- replace torso quad with body image when available ---
   if (lShoulder && rShoulder && lHip && rHip) {
     const centerX = (lShoulder.x + rShoulder.x + lHip.x + rHip.x) / 4;
@@ -382,6 +370,18 @@ function drawAvatar(landmarks, gesture) {
     pop();
   }
 
+  // 手：放在头之后绘制，确保在头前面
+  if (lElbow && lWrist && handLeftImage) {
+    drawHandImage(handLeftImage, lElbow, lWrist, {
+      side: 'left', bodyScale: bodyScaleForArms, handScale: 1.0
+    });
+  }
+  if (rElbow && rWrist && handRightImage) {
+    drawHandImage(handRightImage, rElbow, rWrist, {
+      side: 'right', bodyScale: bodyScaleForArms, handScale: 1.0
+    });
+  }
+
   // limb drawer (thick line + joint circles)
   function drawLimb(a, b, c) {
     if (!a || !b) return;
@@ -471,8 +471,8 @@ function drawAvatar(landmarks, gesture) {
     const imgW = imgH * aspect;
 
     // 本地偏移：FWD 沿手方向（+x），OUT 垂直手方向（+y）
-    const FWD = opts.handFwd != null ? opts.handFwd : 100;         // 往前/往后（沿手方向）
-    const OUT = (opts.handOut != null ? opts.handOut :-12)       // 向外（垂直手方向）
+    const FWD = opts.handFwd != null ? opts.handFwd : 110;         // 往前/往后（沿手方向）
+    const OUT = (opts.handOut != null ? opts.handOut :-18)       // 向外（垂直手方向）
               * (side === 'left' ? 1 : -1);                      // 右手外侧相反
 
     push();
