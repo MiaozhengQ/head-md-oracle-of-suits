@@ -17,7 +17,7 @@ let frameImg; // 最外围蒙版 frame.png（素材相框）
 let frameMaskImg = null; // 由 frame.png 反转 alpha 生成的遮罩（白=保留，黑=裁切）
 let frameMaskReady = false;
 let frameInnerBounds = { x: 0, y: 0, w: 0, h: 0 }; // 镜框内窗的内接矩形（用于约束位置）
-const INDEX_CIRCLE_RADIUS = 90;
+const INDEX_CIRCLE_RADIUS = 80;
 let indexPos = null; // position of index finger circle
 let canvasBG; // background color
 let maskColor; // color tint inside the circular mask

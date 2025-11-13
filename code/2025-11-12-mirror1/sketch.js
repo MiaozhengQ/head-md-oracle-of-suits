@@ -1,6 +1,9 @@
 let img, frameImg, maskedImg, maskImg;
 let firstpiece; // 新增：要画到 back-board 上的“房子”图片
 let imagesReady = false;
+const REDIRECT_URL = 'http://127.0.0.1:5500/code/2025-11-13-Germansuits/FingerPaint/index.html';
+const REDIRECT_DELAY_MS = 3000; // 3 秒后跳转
+let redirectScheduled = false;
 
 let w, h; // mask/frame 大小
 let bbox = {}; // {minX,minY,maxX,maxY,bboxW,bboxH,drawX,drawY,drawW,drawH}
@@ -175,27 +178,19 @@ function draw() {
 
   // 2) 如果有 firstpiece，则把它缩放并居中放入 mask 的可见 bbox（或基于质心）
   if (firstpiece && firstpiece.width > 0) {
-    // 使用 bbox 的可见区域作为目标区域
     const targetW = bbox.bboxW;
     const targetH = bbox.bboxH;
-
-    // 缩放 firstpiece 以适应 target（保留纵横比）
     const fpScale = Math.min(targetW / firstpiece.width, targetH / firstpiece.height);
     const fpW = firstpiece.width * fpScale;
     const fpH = firstpiece.height * fpScale;
-
-    // 居中到可见区域（也可改为用 bbox.drawX/drawY）
     const fpX = bbox.minX + (targetW - fpW) / 2;
     const fpY = bbox.minY + (targetH - fpH) / 2;
-
-    // 将 firstpiece 绘制到临时 graphics（在 mask 作用下，只有可见区域会显示）
     g.image(firstpiece, fpX, fpY, fpW, fpH);
   }
 
   let temp = g.get();
   temp.mask(maskImg); // mask 会修改 temp
 
-  // 将结果按比例缩放以适应窗口并居中显示（使用 mask 的尺寸 w,h）
   const scaleToWindow = Math.min(width / w, height / h);
   const dw = w * scaleToWindow;
   const dh = h * scaleToWindow;
@@ -203,7 +198,13 @@ function draw() {
   const dy = (height - dh) / 2;
 
   image(temp, dx, dy, dw, dh);
-
-  // 叠加原始 frame（保留边框视觉）
   image(frameImg, dx, dy, dw, dh);
+
+  // 首次成功绘制后安排跳转（仅一次）
+  if (!redirectScheduled) {
+    redirectScheduled = true;
+    setTimeout(() => {
+      window.location.href = REDIRECT_URL;
+    }, REDIRECT_DELAY_MS);
+  }
 }
