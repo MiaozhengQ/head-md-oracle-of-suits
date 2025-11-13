@@ -1,5 +1,5 @@
 let balls = [];
-let maxBalls = 14;  // 4 suits + 16 mirror pieces
+let maxBalls = 8;  // 4 suits + 16 mirror pieces
 let lastTouchTime = 0;
 let touchCooldown = 300; // ms per-ball cooldown
 
@@ -27,6 +27,9 @@ const MIRROR_ALPHA = 180;
 const EDGE_MARGIN = 20; // minimum distance from any image edge to canvas border
 // 花色左右分布的带宽比例（相对于镜框内窗宽度）。数值越小，左右范围越窄
 const SUIT_X_BAND_RATIO = 0.30;
+// 花色垂直分布参数：中心下移比例与带宽比例（相对镜框内窗高度）
+const SUIT_Y_CENTER_OFFSET = 0.11; // 正数向下移动（例如 0.18 表示下移 18% 内窗高度）
+const SUIT_Y_BAND_RATIO   = 0.8;  // 垂直带宽占比（越小越窄，只在中下区域活动）
 // snap settings
 const SNAP_HOLD_FRAMES = 30;   // how many consecutive frames inside mask before snapping
 const SNAP_LERP = 0.15;        // how fast the suit moves to the target
@@ -149,10 +152,15 @@ function setup() {
     const halfBand = (ib.w * SUIT_X_BAND_RATIO) * 0.5;
     const suitMinX = constrain(cx - halfBand, minX, maxX);
     const suitMaxX = constrain(cx + halfBand, minX, maxX);
+    // 花色的垂直带：以内窗中心下移 SUIT_Y_CENTER_OFFSET，带宽 = ib.h * SUIT_Y_BAND_RATIO
+    const cy = ib.y + ib.h / 2 + ib.h * SUIT_Y_CENTER_OFFSET;
+    const halfBandY = (ib.h * SUIT_Y_BAND_RATIO) * 0.5;
+    const suitMinY = constrain(cy - halfBandY, minY, maxY);
+    const suitMaxY = constrain(cy + halfBandY, minY, maxY);
 
     balls.push({
       x: (suit ? random(suitMinX, suitMaxX) : random(minX, maxX)),
-      y: random(minY, maxY),
+      y: (suit ? random(suitMinY, suitMaxY) : random(minY, maxY)),
       baseRadius: baseR,
       radius: 0,
       color: color(random(255), 200, 200),
@@ -647,19 +655,24 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
       const maxX = ib.x + ib.w - r - EDGE_MARGIN;
       const minY = ib.y + r + EDGE_MARGIN;
       const maxY = ib.y + ib.h - r - EDGE_MARGIN;
-     // 花色的水平带（与上面一致）
-     const cx = ib.x + ib.w / 2;
-     const halfBand = (ib.w * SUIT_X_BAND_RATIO) * 0.5;
-     const suitMinX = constrain(cx - halfBand, minX, maxX);
-     const suitMaxX = constrain(cx + halfBand, minX, maxX);
+      // 花色的水平带（与上面一致）
+      const cx = ib.x + ib.w / 2;
+      const halfBand = (ib.w * SUIT_X_BAND_RATIO) * 0.5;
+      const suitMinX = constrain(cx - halfBand, minX, maxX);
+      const suitMaxX = constrain(cx + halfBand, minX, maxX);
+      // 花色的垂直带（与上面一致）
+      const cy = ib.y + ib.h / 2 + ib.h * SUIT_Y_CENTER_OFFSET;
+      const halfBandY = (ib.h * SUIT_Y_BAND_RATIO) * 0.5;
+      const suitMinY = constrain(cy - halfBandY, minY, maxY);
+      const suitMaxY = constrain(cy + halfBandY, minY, maxY);
 
       if (b.suit) {
-        let bestPos = { x: random(suitMinX, suitMaxX), y: random(minY, maxY) };
+        let bestPos = { x: random(suitMinX, suitMaxX), y: random(suitMinY, suitMaxY) };
         let bestMinDist = -Infinity;
         const minDistanceThreshold = 150;
         for (let tries = 0; tries < 30; tries++) {
           const testX = random(suitMinX, suitMaxX);
-           const testY = random(minY, maxY);
+          const testY = random(suitMinY, suitMaxY);
           let minDistToOthers = Infinity;
           
           for (let j = 0; j < i; j++) {
