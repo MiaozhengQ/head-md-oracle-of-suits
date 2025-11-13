@@ -1,5 +1,6 @@
 let balls = [];
-let maxBalls = 14;  // 4 suits + 16 mirror pieces
+let maxBalls = 8;  // 4 suits + 16 mirror pieces
+const MIRROR_COUNT = 4;          // 调整镜子碎片数量（例如 4、6、8）
 let lastTouchTime = 0;
 let touchCooldown = 300; // ms per-ball cooldown
 
@@ -25,6 +26,7 @@ const SUIT_SCALE = 1.8;
 const MIRROR_SCALE = 2.2;
 const MIRROR_ALPHA = 180;
 const EDGE_MARGIN = 20; // minimum distance from any image edge to canvas border
+const MIRROR_GAP = 12; // 镜片之间至少保留的像素空隙
 // snap settings
 const SNAP_HOLD_FRAMES = 30;   // how many consecutive frames inside mask before snapping
 const SNAP_LERP = 0.15;        // how fast the suit moves to the target
@@ -148,7 +150,7 @@ function setup() {
     let initY = random(minY, maxY);
     if (suit) {
       const cx = ib.x + ib.w / 2;
-      const cy = ib.y + ib.h / 2 + ib.h * 0.82; // 向下偏移 22% 内窗高度（更靠下）
+      const cy = ib.y + ib.h / 2 + ib.h * 0.22; // 向下偏移 22% 内窗高度（更靠下）
       const rx = min(width, height) * 0.12;     // 椭圆水平半径（更集中）
       const ry = min(width, height) * 0.26;     // 椭圆竖直半径（拉长向下）
       let placed = false;
@@ -364,6 +366,7 @@ function draw() {
     mainG.pop();
   } else {
     // 没有手势时也显示内容，便于调试
+  
     mainG.image(circleG, 0, 0);
   }
 
@@ -648,7 +651,9 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
       let tooMuch = false;
       for (let j = 0; j < i; j++) {
         const other = balls[j];
-        if (overlapFraction(b, other) > maxFrac) {
+       // 镜片-镜片不允许重叠，更严格；其他按默认阈值
+       const pairMaxFrac = (b.isMirror && other.isMirror) ? 0.0 : maxFrac;
+       if (overlapFraction(b, other) > pairMaxFrac) {
           tooMuch = true;
           break;
         }
@@ -664,7 +669,7 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
       if (b.suit) {
         // 使用内窗中心并向下偏移，保证随画布和内窗变化
         const canvasCenterX = ib.x + ib.w / 2;
-        const canvasCenterY = ib.y + ib.h / 2 + ib.h * 0.82; // 向下 22%（更靠下）
+        const canvasCenterY = ib.y + ib.h / 2 + ib.h * 0.22; // 向下 22%（更靠下）
         const suitSpreadRadiusX = min(width, height) * 0.12;
         const suitSpreadRadiusY = min(width, height) * 0.26;
 
@@ -694,47 +699,43 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
         if (bestPos) { b.x = bestPos.x; b.y = bestPos.y; }
         else { b.x = random(minX, maxX); b.y = random(minY, maxY); }
       } else {
-         // 碎片：以镜框内窗中心为核心，均匀分布
-         const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
-         const centerX = ib.x + ib.w / 2;
-         const centerY = ib.y + ib.h / 2;
-         const spreadRadiusX = ib.w * 0.42; // 水平半径：内窗宽的 42%，增大以分散
-         const spreadRadiusY = ib.h * 0.42; // 竖直半径：内窗高的 42%，增大以分散
-         
-         let bestPos = null;
-         let bestMinDist = -Infinity;
-         
-         for (let tries = 0; tries < 15; tries++) { // 增加尝试次数
-           // 改为在椭圆内均匀随机（使用 sqrt 校正距离分布）
-           const angle = random(TWO_PI);
-           const distance = sqrt(random(1)); // sqrt 使分布均匀（不会偏向中心）
-           const testX = centerX + cos(angle) * distance * spreadRadiusX;
-           const testY = centerY + sin(angle) * distance * spreadRadiusY;
-           
-           // 确保在镜框内
-           if (testX < minX || testX > maxX || testY < minY || testY > maxY) continue;
-           
-           let minDistToOthers = Infinity;
-           for (let j = 0; j < i; j++) {
-             const d = dist(testX, testY, balls[j].x, balls[j].y);
-             minDistToOthers = min(minDistToOthers, d);
-           }
-           
-           if (minDistToOthers > bestMinDist) {
-             bestMinDist = minDistToOthers;
-             bestPos = { x: testX, y: testY };
-           }
-         }
-         
-         if (bestPos) {
-           b.x = bestPos.x;
-           b.y = bestPos.y;
-         } else {
-           // 备选：若无法在中心附近找到位置，使用全范围随机
-           b.x = random(minX, maxX);
-           b.y = random(minY, maxY);
-         }
-       }
+        // 镜片：严格无重叠，使用“最小间距 + 更大分布椭圆”
+        const centerX = ib.x + ib.w / 2;
+        const centerY = ib.y + ib.h / 2;
+        const spreadRadiusX = ib.w * 0.46;
+        const spreadRadiusY = ib.h * 0.46;
+
+        let bestPos = null;
+        let bestScore = -Infinity;
+        for (let tries = 0; tries < 60; tries++) {
+          const angle = random(TWO_PI);
+          const distance = sqrt(random(1));
+          const testX = centerX + cos(angle) * distance * spreadRadiusX;
+          const testY = centerY + sin(angle) * distance * spreadRadiusY;
+          if (testX < minX || testX > maxX || testY < minY || testY > maxY) continue;
+          // 确保与所有已有元素保持“半径之和 + 额外间隙”的最小距离
+          let valid = true;
+          let minGap = Infinity;
+          const rSelf = effectiveRadius(b);
+          for (let j = 0; j < i; j++) {
+            const o = balls[j];
+            const req = rSelf + effectiveRadius(o) + MIRROR_GAP;
+            const d = dist(testX, testY, o.x, o.y);
+            const gap = d - req;
+            if (gap < 0) { valid = false; break; }
+            minGap = min(minGap, gap);
+          }
+          if (!valid) continue;
+          // 评分：越远越好
+          const score = minGap;
+          if (score > bestScore) {
+            bestScore = score;
+            bestPos = { x: testX, y: testY };
+          }
+        }
+        if (bestPos) { b.x = bestPos.x; b.y = bestPos.y; }
+        else { b.x = random(minX, maxX); b.y = random(minY, maxY); }
+      }
       attempts++;
     }
   }
