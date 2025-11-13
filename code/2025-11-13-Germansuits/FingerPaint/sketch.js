@@ -104,26 +104,7 @@ function setup() {
   mainG.pixelDensity(1);
   mainG.colorMode(HSB, 255);
 
-  // 生成"内窗为白"的遮罩（基于 frame.png，使用 copy 保证尺寸与像素密度一致）
-  if (frameImg && frameImg.width > 0) {
-    const scaledFrame = createImage(width, height);
-    scaledFrame.copy(frameImg, 0, 0, frameImg.width, frameImg.height, 0, 0, width, height);
-    scaledFrame.loadPixels();
-    frameMaskImg = createImage(width, height);
-    frameMaskImg.loadPixels();
-    for (let i = 0; i < scaledFrame.pixels.length; i += 4) {
-      const a = scaledFrame.pixels[i + 3];
-      const m = 255 - a; // 中心透明(0)->255，边框不透明(255)->0
-      // p5.Image.mask 使用的是 mask 的 alpha 通道
-      frameMaskImg.pixels[i]     = 255; // RGB 随意
-      frameMaskImg.pixels[i + 1] = 255;
-      frameMaskImg.pixels[i + 2] = 255;
-      frameMaskImg.pixels[i + 3] = m;   // 关键：alpha = m（白=保留，黑=裁切）
-    }
-    frameMaskImg.updatePixels();
-    frameMaskReady = true;
-    computeFrameInnerBounds(); // 基于 mask 计算镜框内窗的内接矩形
-  }
+  buildFrameMask();
 
   initSuitTargets(); // compute snap targets based on current canvas size
 
@@ -219,26 +200,7 @@ function windowResized() {
    mainG.pixelDensity(1);
    mainG.colorMode(HSB, 255);
   
-  // 重新生成 frame mask
-  if (frameImg && frameImg.width > 0) {
-    const scaledFrame = createImage(width, height);
-    scaledFrame.copy(frameImg, 0, 0, frameImg.width, frameImg.height, 0, 0, width, height);
-    scaledFrame.loadPixels();
-    frameMaskImg = createImage(width, height);
-    frameMaskImg.loadPixels();
-    for (let i = 0; i < scaledFrame.pixels.length; i += 4) {
-      const a = scaledFrame.pixels[i + 3];
-      const m = 255 - a;
-      frameMaskImg.pixels[i]     = 255;
-      frameMaskImg.pixels[i + 1] = 255;
-      frameMaskImg.pixels[i + 2] = 255;
-      frameMaskImg.pixels[i + 3] = m;
-    }
-    frameMaskImg.updatePixels();
-    frameMaskReady = true;
-    computeFrameInnerBounds();
-  }
-  
+   buildFrameMask();
   initSuitTargets();
   // refresh target positions for suits
   for (const b of balls) {
@@ -373,11 +335,7 @@ function draw() {
     mainG.strokeWeight(2);
     mainG.circle(indexPos.x, indexPos.y, INDEX_CIRCLE_RADIUS * 2);
     mainG.pop();
-  } else {
-    // 没有手势时也显示内容，便于调试
-  
-    mainG.image(circleG, 0, 0);
-  }
+  } 
 
   // 先清空主画布，避免上帧残留在蒙版外
   clear();
@@ -389,7 +347,8 @@ function draw() {
   // 把裁剪后的内容画到主画布
   image(composed, 0, 0);
   if (frameImg && frameImg.width > 0) {
-    image(frameImg, 0, 0, width, height); // 最上层相框装饰
+    const { dx, dy, drawW, drawH } = computeFramePlacement();
+    image(frameImg, dx, dy, drawW, drawH); // 按比例居中，不拉伸
   }
 
   // 显示文字提示
@@ -792,4 +751,70 @@ function computeFrameInnerBounds() {
     } else {
       frameInnerBounds = { x: 0, y: 0, w: width, h: height };
     }
+}
+function computeFramePlacement() {
+  if (!frameImg || frameImg.width === 0) return { dx: 0, dy: 0, drawW: width, drawH: height };
+  const fw = frameImg.width, fh = frameImg.height;
+  const s = Math.min(width / fw, height / fh); // 保持原图比例
+  const drawW = Math.round(fw * s);
+  const drawH = Math.round(fh * s);
+  const dx = Math.round((width - drawW) / 2);
+  const dy = Math.round((height - drawH) / 2);
+  return { dx, dy, drawW, drawH };
+}
+
+function buildFrameMask() {
+  if (!frameImg || frameImg.width === 0) return;
+  const { dx, dy, drawW, drawH } = computeFramePlacement();
+  const g = createGraphics(width, height);
+  g.pixelDensity(1);
+  g.clear();
+  g.image(frameImg, dx, dy, drawW, drawH); // 按比例居中绘制
+  const frameCanvas = g.get();
+  frameCanvas.loadPixels();
+
+  // 检测是否存在透明窗
+  let transparentCount = 0;
+  for (let i = 0; i < frameCanvas.pixels.length; i += 4) {
+    if (frameCanvas.pixels[i + 3] < 10) transparentCount++;
+  }
+
+  frameMaskImg = createImage(width, height);
+  frameMaskImg.loadPixels();
+
+  if (transparentCount > 1000) {
+    // 反转 alpha 作为遮罩：透明窗->白，边框->黑
+    for (let i = 0; i < frameCanvas.pixels.length; i += 4) {
+      const a = frameCanvas.pixels[i + 3];
+      const m = 255 - a;
+      frameMaskImg.pixels[i]     = 255;
+      frameMaskImg.pixels[i + 1] = 255;
+      frameMaskImg.pixels[i + 2] = 255;
+      frameMaskImg.pixels[i + 3] = m;
+    }
+    frameMaskImg.updatePixels();
+    frameMaskReady = true;
+    computeFrameInnerBounds();
+  } else {
+    // 无透明窗：用矩形回退窗口
+    const padXRatio = 0.12, padYRatio = 0.12;
+    const innerX = Math.round(dx + drawW * padXRatio);
+    const innerY = Math.round(dy + drawH * padYRatio);
+    const innerW = Math.round(drawW * (1 - 2 * padXRatio));
+    const innerH = Math.round(drawH * (1 - 2 * padYRatio));
+
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = 4 * (y * width + x);
+        const inside = (x >= innerX && x < innerX + innerW && y >= innerY && y < innerY + innerH);
+        frameMaskImg.pixels[idx]     = 255;
+        frameMaskImg.pixels[idx + 1] = 255;
+        frameMaskImg.pixels[idx + 2] = 255;
+        frameMaskImg.pixels[idx + 3] = inside ? 255 : 0;
+      }
+    }
+    frameMaskImg.updatePixels();
+    frameMaskReady = true;
+    frameInnerBounds = { x: innerX, y: innerY, w: innerW, h: innerH };
+  }
 }

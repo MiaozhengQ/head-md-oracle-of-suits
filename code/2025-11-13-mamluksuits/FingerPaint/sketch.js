@@ -371,10 +371,7 @@ function draw() {
     mainG.strokeWeight(2);
     mainG.circle(indexPos.x, indexPos.y, INDEX_CIRCLE_RADIUS * 2);
     mainG.pop();
-  } else {
-    // 没有手势时也显示内容，便于调试
-    mainG.image(circleG, 0, 0);
-  }
+  } 
 
   // 先清空主画布，避免上帧残留在蒙版外
   clear();
