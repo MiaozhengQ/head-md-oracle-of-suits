@@ -16,6 +16,7 @@ let mainG;  // 主 offscreen，把所有内容先画到这里
 let frameImg; // 最外围蒙版 frame.png（素材相框）
 let frameMaskImg = null; // 由 frame.png 反转 alpha 生成的遮罩（白=保留，黑=裁切）
 let frameMaskReady = false;
+let frameInnerBounds = { x: 0, y: 0, w: 0, h: 0 }; // 镜框内窗的内接矩形（用于约束位置）
 const INDEX_CIRCLE_RADIUS = 90;
 let indexPos = null; // position of index finger circle
 let canvasBG; // background color
@@ -23,7 +24,7 @@ let maskColor; // color tint inside the circular mask
 const SUIT_SCALE = 1.8;
 const MIRROR_SCALE = 2.2;
 const MIRROR_ALPHA = 180;
-const EDGE_MARGIN = 20; // minimum distance from any image edge to canvas border
+const EDGE_MARGIN = 50; // 增大：离镜框边缘更远
 // snap settings
 const SNAP_HOLD_FRAMES = 30;   // how many consecutive frames inside mask before snapping
 const SNAP_LERP = 0.15;        // how fast the suit moves to the target
@@ -59,13 +60,14 @@ const PICK_RADIUS = 140;             // px radius to search nearest ball when ap
 const RELEASE_DEPTH_FACTOR = 0.5;    // fraction of DEPTH_THRESHOLD below which to release
 
 function initSuitTargets() {
-  // keep targets safely inside canvas
-  const leftX   = EDGE_MARGIN + TARGET_PAD;
-  const rightX  = width - (EDGE_MARGIN + TARGET_PAD);
-  const topY    = EDGE_MARGIN + TARGET_PAD;
-  const bottomY = height - (EDGE_MARGIN + TARGET_PAD); // 修正：用加号
-  const midX = width / 2;
-  const midY = height / 2;
+  // keep targets inside frame inner window
+  const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
+  const leftX   = ib.x + EDGE_MARGIN + TARGET_PAD;
+  const rightX  = ib.x + ib.w - (EDGE_MARGIN + TARGET_PAD);
+  const topY    = ib.y + EDGE_MARGIN + TARGET_PAD;
+  const bottomY = ib.y + ib.h - (EDGE_MARGIN + TARGET_PAD);
+  const midX = ib.x + ib.w / 2;
+  const midY = ib.y + ib.h / 2;
   suitTargets = {
     diamond: { x: midX,  y: topY },    // top-center
     club:    { x: rightX, y: midY },   // right-center
@@ -102,14 +104,16 @@ function setup() {
     frameMaskImg.loadPixels();
     for (let i = 0; i < scaledFrame.pixels.length; i += 4) {
       const a = scaledFrame.pixels[i + 3];
-      const m = 255 - a;
-      frameMaskImg.pixels[i] = m;
-      frameMaskImg.pixels[i + 1] = m;
-      frameMaskImg.pixels[i + 2] = m;
-      frameMaskImg.pixels[i + 3] = 255;
+      const m = 255 - a; // 中心透明(0)->255，边框不透明(255)->0
+      // p5.Image.mask 使用的是 mask 的 alpha 通道
+      frameMaskImg.pixels[i]     = 255; // RGB 随意
+      frameMaskImg.pixels[i + 1] = 255;
+      frameMaskImg.pixels[i + 2] = 255;
+      frameMaskImg.pixels[i + 3] = m;   // 关键：alpha = m（白=保留，黑=裁切）
     }
     frameMaskImg.updatePixels();
     frameMaskReady = true;
+    computeFrameInnerBounds(); // 基于 mask 计算镜框内窗的内接矩形
   }
 
   initSuitTargets(); // compute snap targets based on current canvas size
@@ -123,14 +127,15 @@ function setup() {
     const mirrorIndex = (suit === null) ? ((i - suitsPool.length) % mirrorImgs.length) : -1;
 
     const baseR = random(20, 60);
-    // pre‑compute max rendered radius for proper initial placement
     const renderRadius = suit
       ? baseR * SUIT_SCALE
-      : (baseR * 2.5 * MIRROR_SCALE); // mirror: drawH = baseR*5*MIRROR_SCALE so radius = half
-    const minX = renderRadius + EDGE_MARGIN;
-    const maxX = width - renderRadius - EDGE_MARGIN;
-    const minY = renderRadius + EDGE_MARGIN;
-    const maxY = height - renderRadius - EDGE_MARGIN;
+      : (baseR * 2.5 * MIRROR_SCALE);
+    // 生成在镜框内窗范围内
+    const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
+    const minX = ib.x + renderRadius + EDGE_MARGIN;
+    const maxX = ib.x + ib.w - renderRadius - EDGE_MARGIN;
+    const minY = ib.y + renderRadius + EDGE_MARGIN;
+    const maxY = ib.y + ib.h - renderRadius - EDGE_MARGIN;
 
     balls.push({
       x: random(minX, maxX),
@@ -161,9 +166,7 @@ function setup() {
 }
 
 function windowResized() {
-  // 重新调整画布大小，适应窗口
   resizeCanvas(windowWidth, windowHeight);
-  
   // 重新生成 offscreen graphics
   circleG = createGraphics(width, height);
   circleG.pixelDensity(1);
@@ -181,13 +184,14 @@ function windowResized() {
     for (let i = 0; i < scaledFrame.pixels.length; i += 4) {
       const a = scaledFrame.pixels[i + 3];
       const m = 255 - a;
-      frameMaskImg.pixels[i] = m;
-      frameMaskImg.pixels[i + 1] = m;
-      frameMaskImg.pixels[i + 2] = m;
-      frameMaskImg.pixels[i + 3] = 255;
+      frameMaskImg.pixels[i]     = 255;
+      frameMaskImg.pixels[i + 1] = 255;
+      frameMaskImg.pixels[i + 2] = 255;
+      frameMaskImg.pixels[i + 3] = m;
     }
     frameMaskImg.updatePixels();
     frameMaskReady = true;
+    computeFrameInnerBounds();
   }
   
   initSuitTargets();
@@ -265,6 +269,7 @@ function draw() {
            if (b) {
              b.x = ix + dragOffsetX;
              b.y = iy + dragOffsetY;
+            clampBallInside(b); // 拖拽时即时夹紧
  
              const releaseByDepth = dz < (DEPTH_THRESHOLD * RELEASE_DEPTH_FACTOR);
              const d2 = dist(ix, iy, b.x, b.y);
@@ -369,12 +374,23 @@ function currentRenderRadius(b) {
 
 function clampBallInside(b) {
   const r = currentRenderRadius(b);
-  b.x = constrain(b.x, r + EDGE_MARGIN, width - (r + EDGE_MARGIN));
-  b.y = constrain(b.y, r + EDGE_MARGIN, height - (r + EDGE_MARGIN));
+  const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
+  b.x = constrain(b.x, ib.x + r + EDGE_MARGIN, ib.x + ib.w - (r + EDGE_MARGIN));
+  b.y = constrain(b.y, ib.y + r + EDGE_MARGIN, ib.y + ib.h - (r + EDGE_MARGIN));
+}
+
+// 仅用于绘制时对抖动后的位置做夹紧（不改动 b.x/b.y）
+function clampPointToInnerBounds(x, y, r) {
+  const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
+  const cx = constrain(x, ib.x + r + EDGE_MARGIN, ib.x + ib.w - (r + EDGE_MARGIN));
+  const cy = constrain(y, ib.y + r + EDGE_MARGIN, ib.y + ib.h - (r + EDGE_MARGIN));
+  return { x: cx, y: cy };
 }
 
 function keepInsideAllBalls() {
-  for (const b of balls) clampBallInside(b);
+  for (const b of balls) {
+    if (!b.snap && !b.locked) clampBallInside(b); // 正在外移/已锁定的跳过
+  }
 }
 
 // update index finger position (center of moving circle)
@@ -414,25 +430,25 @@ function drawBallsToGraphics(g) {
   const now = millis();
   
   for (let b of balls) {
-    // skip rendering locked suits (they've exited the canvas)
     if (b.locked) continue;
     
     g.fill(b.color);
     const t = frameCount;
     
-    // initialize pulse state per ball
     if (b.pulseStart == null) b.pulseStart = 0;
     if (b.wasInside == null) b.wasInside = false;
     
-    // only suits wiggle; mirrors stay static (unless locked, still allow small wiggle if you want)
     let rx = 0, ry = 0;
     if (b.suit) {
-      const wig = b.locked ? 0.3 : 1; // reduce wiggle after locked, optional
+      const wig = b.locked ? 0.3 : 1;
       rx = (noise(b.noiseX + t * b.wiggleSpeed)) * 20 * b.wiggle * wig;
       ry = (noise(b.noiseY + t * b.wiggleSpeed)) * 20 * b.wiggle * wig;
     }
     
-    // check if suit is inside the circle mask
+    // 计算绘制半径与抖动后的绘制位置，并夹紧到镜框内窗
+    const renderR = currentRenderRadius(b);
+    const drawPos = clampPointToInnerBounds(b.x + rx, b.y + ry, renderR);
+    
     const inside = indexPos && dist(b.x, b.y, indexPos.x, indexPos.y) <= INDEX_CIRCLE_RADIUS;
     
     // snap logic: after staying inside for SNAP_HOLD_FRAMES, start moving outside canvas
@@ -441,11 +457,12 @@ function drawBallsToGraphics(g) {
         b.insideCount = (b.insideCount || 0) + 1;
         if (!b.snap && b.insideCount >= SNAP_HOLD_FRAMES) {
           b.snap = true;
-          // set random exit direction (outside canvas)
-          const angle = random(TWO_PI);
-          const distance = 500; // how far outside to move
-          b.targetX = indexPos.x + cos(angle) * distance;
-          b.targetY = indexPos.y + sin(angle) * distance;
+          // 不再设置外部目标，改为：让 suit 逐帧靠近圆心边缘，然后锁定
+          // （这样就不会向画布外移动）
+          const angle = atan2(indexPos.y - b.y, indexPos.x - b.x);
+          const snapRadius = INDEX_CIRCLE_RADIUS + 20; // 圆心边缘稍外一点
+          b.targetX = indexPos.x + cos(angle) * snapRadius;
+          b.targetY = indexPos.y + sin(angle) * snapRadius;
         }
       } else {
         b.insideCount = 0;
@@ -453,10 +470,12 @@ function drawBallsToGraphics(g) {
       if (b.snap && b.targetX != null && b.targetY != null) {
         b.x = lerp(b.x, b.targetX, SNAP_LERP);
         b.y = lerp(b.y, b.targetY, SNAP_LERP);
+        clampBallInside(b); // snap 时也夹紧
         // lock when very close; also disable interaction
         if (dist(b.x, b.y, b.targetX, b.targetY) < 5) {
           b.x = b.targetX;
           b.y = b.targetY;
+          clampBallInside(b); // 锁定前最后夹紧一次
           b.locked = true;
           b.active = false;
           b.snap = false;
@@ -502,13 +521,12 @@ function drawBallsToGraphics(g) {
         g.tint(255, imgAlpha);
         const drawW = (b.radius * 2) * pulseMul * SUIT_SCALE * (img.width / max(img.height, 1));
         const drawH = (b.radius * 2) * pulseMul * SUIT_SCALE;
-        g.image(img, b.x + rx, b.y + ry, drawW, drawH);
+        g.image(img, drawPos.x, drawPos.y, drawW, drawH);
         g.pop();
         continue;
       }
     }
     
-    // draw broken mirror image instead of circle
     if (b.isMirror && b.mirrorIndex >= 0 && mirrorImgs[b.mirrorIndex]) {
       g.push();
       g.imageMode(CENTER);
@@ -516,11 +534,11 @@ function drawBallsToGraphics(g) {
       g.tint(255, MIRROR_ALPHA);
       const drawH = b.radius * 5 * MIRROR_SCALE;
       const drawW = drawH * (img.width / max(img.height, 1));
-      g.image(img, b.x, b.y, drawW, drawH);
+      g.image(img, drawPos.x, drawPos.y, drawW, drawH);
       g.noTint();
       g.pop();
     } else {
-      g.circle(b.x, b.y, b.radius * 2);
+      g.circle(drawPos.x, drawPos.y, b.radius * 2);
     }
   }
 }
@@ -562,12 +580,54 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
         }
       }
       if (!tooMuch) break;
-      // reposition
-      b.x = random(width * 0.1, width * 0.9);
-      b.y = random(height * 0.1, height * 0.9);
-      attempts++;
-    }
-  }
+      // reposition 在镜框内窗范围内
+      const r = currentRenderRadius(b);
+      const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
+      const minX = ib.x + r + EDGE_MARGIN;
+      const maxX = ib.x + ib.w - r - EDGE_MARGIN;
+      const minY = ib.y + r + EDGE_MARGIN;
+      const maxY = ib.y + ib.h - r - EDGE_MARGIN;
+      b.x = random(minX, maxX);
+      b.y = random(minY, maxY);
+       attempts++;
+     }
+   }
 }
 
 let transferred = false; // 新增：防止重复跳转
+
+// 基于 mask 计算镜框内窗的内接矩形
+function computeFrameInnerBounds() {
+  if (!frameMaskReady || !frameMaskImg) {
+    frameInnerBounds = { x: 0, y: 0, w: width, h: height };
+    return;
+  }
+  frameMaskImg.loadPixels();
+  let minX = width, maxX = -1, minY = height, maxY = -1;
+  // 采样步长（加快扫描，越小越精确）
+  const step = 2;
+  for (let y = 0; y < height; y += step) {
+    for (let x = 0; x < width; x += step) {
+      const idx = 4 * (y * width + x);
+      const a = frameMaskImg.pixels[idx + 3]; // alpha
+      if (a > 6) { // 在保留区域内
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX >= minX && maxY >= minY) {
+    // 分别调整水平和竖直的内缩距离
+    const padHorizontal = 210; // 左右内缩距离
+    const padVertical = 110;   // 上下内缩距离
+    minX = constrain(minX + padHorizontal, 0, width);
+    minY = constrain(minY + padVertical, 0, height);
+    maxX = constrain(maxX - padHorizontal, 0, width);
+    maxY = constrain(maxY - padVertical, 0, height);
+    frameInnerBounds = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  } else {
+    frameInnerBounds = { x: 0, y: 0, w: width, h: height };
+  }
+}
