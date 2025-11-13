@@ -143,30 +143,9 @@ function setup() {
     const minY = ib.y + renderRadius + EDGE_MARGIN;
     const maxY = ib.y + ib.h - renderRadius - EDGE_MARGIN;
 
-    // 花色：以内窗中心向下偏移的椭圆为分布中心
-    let initX = random(minX, maxX);
-    let initY = random(minY, maxY);
-    if (suit) {
-      const cx = ib.x + ib.w / 2;
-      const cy = ib.y + ib.h / 2 + ib.h * 0.82; // 向下偏移 22% 内窗高度（更靠下）
-      const rx = min(width, height) * 0.12;     // 椭圆水平半径（更集中）
-      const ry = min(width, height) * 0.26;     // 椭圆竖直半径（拉长向下）
-      let placed = false;
-      for (let t = 0; t < 20; t++) {
-        const ang = random(TWO_PI);
-        const dist01 = sqrt(random()); // 均匀填充
-        const tx = cx + cos(ang) * dist01 * rx;
-        const ty = cy + sin(ang) * dist01 * ry;
-        if (tx >= minX && tx <= maxX && ty >= minY && ty <= maxY) {
-          initX = tx; initY = ty; placed = true; break;
-        }
-      }
-      if (!placed) { initX = constrain(initX, minX, maxX); initY = constrain(initY, minY, maxY); }
-    }
-
     balls.push({
-      x: initX,
-      y: initY,
+      x: random(minX, maxX),
+      y: random(minY, maxY),
       baseRadius: baseR,
       radius: 0,
       color: color(random(255), 200, 200),
@@ -654,46 +633,39 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
         }
       }
       if (!tooMuch) break;
+      // reposition 在镜框内窗范围内
       const r = currentRenderRadius(b);
       const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
       const minX = ib.x + r + EDGE_MARGIN;
       const maxX = ib.x + ib.w - r - EDGE_MARGIN;
       const minY = ib.y + r + EDGE_MARGIN;
       const maxY = ib.y + ib.h - r - EDGE_MARGIN;
-
+      
+      // 对花色使用更严格的分散策略
       if (b.suit) {
-        // 使用内窗中心并向下偏移，保证随画布和内窗变化
-        const canvasCenterX = ib.x + ib.w / 2;
-        const canvasCenterY = ib.y + ib.h / 2 + ib.h * 0.82; // 向下 22%（更靠下）
-        const suitSpreadRadiusX = min(width, height) * 0.12;
-        const suitSpreadRadiusY = min(width, height) * 0.26;
-
-        let bestPos = null;
+        // suits：尝试找到离其他球最远的位置
+        let bestPos = { x: random(minX, maxX), y: random(minY, maxY) };
         let bestMinDist = -Infinity;
-        const minDistanceThreshold = 250;
-
-        for (let tries = 0; tries < 30; tries++) {
-          const angle = random(TWO_PI);
-          const distance = sqrt(random(1));
-          const testX = canvasCenterX + cos(angle) * distance * suitSpreadRadiusX;
-          const testY = canvasCenterY + sin(angle) * distance * suitSpreadRadiusY;
-          if (testX < minX || testX > maxX || testY < minY || testY > maxY) continue;
-
-          let minDistToOthers = Infinity;
-          for (let j = 0; j < i; j++) {
-            const d = dist(testX, testY, balls[j].x, balls[j].y);
-            minDistToOthers = min(minDistToOthers, d);
-          }
-          // 优先满足阈值的点
-          const score = (minDistToOthers >= minDistanceThreshold) ? minDistToOthers + 1000 : minDistToOthers;
-          if (score > bestMinDist) {
-            bestMinDist = score;
-            bestPos = { x: testX, y: testY };
-          }
-        }
-        if (bestPos) { b.x = bestPos.x; b.y = bestPos.y; }
-        else { b.x = random(minX, maxX); b.y = random(minY, maxY); }
-      } else {
+        const minDistanceThreshold = 150; // 减小距离阈值，让花色更容易分散
+         
+        for (let tries = 0; tries < 30; tries++) { // 增加尝试次数
+           const testX = random(minX, maxX);
+           const testY = random(minY, maxY);
+           let minDistToOthers = Infinity;
+           
+           for (let j = 0; j < i; j++) {
+             const d = dist(testX, testY, balls[j].x, balls[j].y);
+             minDistToOthers = min(minDistToOthers, d);
+           }
+           
+           if (minDistToOthers > bestMinDist) {
+             bestMinDist = minDistToOthers;
+             bestPos = { x: testX, y: testY };
+           }
+         }
+         b.x = bestPos.x;
+         b.y = bestPos.y;
+       } else {
          // 碎片：以镜框内窗中心为核心，均匀分布
          const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
          const centerX = ib.x + ib.w / 2;
@@ -735,9 +707,9 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
            b.y = random(minY, maxY);
          }
        }
-      attempts++;
+        attempts++;
+      }
     }
-  }
 }
 let transferred = false; // 新增：防止重复跳转
 
