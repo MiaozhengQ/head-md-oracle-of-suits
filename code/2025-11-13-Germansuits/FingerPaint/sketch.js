@@ -18,7 +18,7 @@ let frameImg; // 最外围蒙版 frame.png（素材相框）
 let frameMaskImg = null; // 由 frame.png 反转 alpha 生成的遮罩（白=保留，黑=裁切）
 let frameMaskReady = false;
 let frameInnerBounds = { x: 0, y: 0, w: 0, h: 0 }; // 镜框内窗的内接矩形（用于约束位置）
-const INDEX_CIRCLE_RADIUS = 90;
+const INDEX_CIRCLE_RADIUS = 80;
 let indexPos = null; // position of index finger circle
 let canvasBG; // background color
 let maskColor; // color tint inside the circular mask
@@ -27,6 +27,7 @@ const MIRROR_SCALE = 2.2;
 const MIRROR_ALPHA = 180;
 const EDGE_MARGIN = 20; // minimum distance from any image edge to canvas border
 const MIRROR_GAP = 12; // 镜片之间至少保留的像素空隙
+const SUIT_GAP = 180;   // 花色之间额外保留的最小像素间隙
 // snap settings
 const SNAP_HOLD_FRAMES = 30;   // how many consecutive frames inside mask before snapping
 const SNAP_LERP = 0.15;        // how fast the suit moves to the target
@@ -151,17 +152,25 @@ function setup() {
     if (suit) {
       const cx = ib.x + ib.w / 2;
       const cy = ib.y + ib.h / 2 + ib.h * 0.22; // 向下偏移 22% 内窗高度（更靠下）
-      const rx = min(width, height) * 0.12;     // 椭圆水平半径（更集中）
-      const ry = min(width, height) * 0.26;     // 椭圆竖直半径（拉长向下）
+      const rx = ib.w * 0.26;                   // 扩大分布范围（相对内窗）
+      const ry = ib.h * 0.36;
       let placed = false;
-      for (let t = 0; t < 20; t++) {
+      for (let t = 0; t < 40; t++) {
         const ang = random(TWO_PI);
         const dist01 = sqrt(random()); // 均匀填充
         const tx = cx + cos(ang) * dist01 * rx;
         const ty = cy + sin(ang) * dist01 * ry;
-        if (tx >= minX && tx <= maxX && ty >= minY && ty <= maxY) {
-          initX = tx; initY = ty; placed = true; break;
+        if (tx < minX || tx > maxX || ty < minY || ty > maxY) continue;
+        // 对比已放置的花色，保证中心距 >= 半径和 + SUIT_GAP
+        const rSelf = baseR * SUIT_SCALE;
+        let ok = true;
+        for (let j = 0; j < balls.length; j++) {
+          const o = balls[j];
+          if (!o.suit) continue;
+          const req = rSelf + effectiveRadius(o) + SUIT_GAP;
+          if (dist(tx, ty, o.x, o.y) < req) { ok = false; break; }
         }
+        if (ok) { initX = tx; initY = ty; placed = true; break; }
       }
       if (!placed) { initX = constrain(initX, minX, maxX); initY = constrain(initY, minY, maxY); }
     }
@@ -406,7 +415,7 @@ function draw() {
       try { localStorage.setItem('foundSuits', JSON.stringify(suitsData)); } catch(e) { /* ignore */ }
 
       // 跳转到目标页面（根据你的项目结构调整 URL）
-      const redirectUrl = 'http://127.0.0.1:5500/code/2025-11-12-mirror1/index.html';
+      const redirectUrl = 'http://127.0.0.1:5500/code/2025-11-12-mirror2/index.html';
       // 若你希望在同一窗口打开，使用 location.href；若新窗口使用 window.open
       window.location.href = redirectUrl;
       // window.open(redirectUrl, '_blank');
@@ -651,9 +660,9 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
       let tooMuch = false;
       for (let j = 0; j < i; j++) {
         const other = balls[j];
-       // 镜片-镜片不允许重叠，更严格；其他按默认阈值
-       const pairMaxFrac = (b.isMirror && other.isMirror) ? 0.0 : maxFrac;
-       if (overlapFraction(b, other) > pairMaxFrac) {
+       // 镜片-镜片与花色-花色均不允许重叠；其他按默认阈值
+       const pairMaxFrac = ((b.isMirror && other.isMirror) || (b.suit && other.suit)) ? 0.0 : maxFrac;
+        if (overlapFraction(b, other) > pairMaxFrac) {
           tooMuch = true;
           break;
         }
@@ -667,34 +676,37 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
       const maxY = ib.y + ib.h - r - EDGE_MARGIN;
 
       if (b.suit) {
-        // 使用内窗中心并向下偏移，保证随画布和内窗变化
+        // 使用内窗中心并向下偏移，扩大分布区并应用“最小间距”
         const canvasCenterX = ib.x + ib.w / 2;
-        const canvasCenterY = ib.y + ib.h / 2 + ib.h * 0.22; // 向下 22%（更靠下）
-        const suitSpreadRadiusX = min(width, height) * 0.12;
-        const suitSpreadRadiusY = min(width, height) * 0.26;
+        const canvasCenterY = ib.y + ib.h / 2 + ib.h * 0.22; // 向下 22%
+        const suitSpreadRadiusX = ib.w * 0.26;
+        const suitSpreadRadiusY = ib.h * 0.36;
 
         let bestPos = null;
-        let bestMinDist = -Infinity;
-        const minDistanceThreshold = 250;
+        let bestScore = -Infinity;
+        const rSelf = effectiveRadius(b);
 
-        for (let tries = 0; tries < 30; tries++) {
+        for (let tries = 0; tries < 50; tries++) {
           const angle = random(TWO_PI);
           const distance = sqrt(random(1));
           const testX = canvasCenterX + cos(angle) * distance * suitSpreadRadiusX;
           const testY = canvasCenterY + sin(angle) * distance * suitSpreadRadiusY;
           if (testX < minX || testX > maxX || testY < minY || testY > maxY) continue;
 
-          let minDistToOthers = Infinity;
+          // 与所有已放置元素保持：中心距 >= 半径和 + SUIT_GAP
+          let valid = true;
+          let minGap = Infinity;
           for (let j = 0; j < i; j++) {
-            const d = dist(testX, testY, balls[j].x, balls[j].y);
-            minDistToOthers = min(minDistToOthers, d);
+            const o = balls[j];
+            const req = rSelf + effectiveRadius(o) + SUIT_GAP;
+            const d = dist(testX, testY, o.x, o.y);
+            const gap = d - req;
+            if (gap < 0) { valid = false; break; }
+            minGap = min(minGap, gap);
           }
-          // 优先满足阈值的点
-          const score = (minDistToOthers >= minDistanceThreshold) ? minDistToOthers + 1000 : minDistToOthers;
-          if (score > bestMinDist) {
-            bestMinDist = score;
-            bestPos = { x: testX, y: testY };
-          }
+          if (!valid) continue;
+          const score = minGap; // 越远越好
+          if (score > bestScore) { bestScore = score; bestPos = { x: testX, y: testY }; }
         }
         if (bestPos) { b.x = bestPos.x; b.y = bestPos.y; }
         else { b.x = random(minX, maxX); b.y = random(minY, maxY); }
@@ -770,8 +782,8 @@ function computeFrameInnerBounds() {
   }
   if (maxX >= minX && maxY >= minY) {
     // 分别调整水平和竖直的内缩距离
-    const padHorizontal = 100; // 左右内缩距离，减小以平衡左右
-    const padVertical = 100;   // 上下内缩距离
+    const padHorizontal = 110; // 左右内缩距离，减小以平衡左右
+    const padVertical = 120;   // 上下内缩距离
      minX = constrain(minX + padHorizontal, 0, width);
      minY = constrain(minY + padVertical, 0, height);
      maxX = constrain(maxX - padHorizontal, 0, width);
