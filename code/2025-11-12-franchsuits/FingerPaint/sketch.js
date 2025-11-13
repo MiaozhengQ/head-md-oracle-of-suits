@@ -25,6 +25,8 @@ const SUIT_SCALE = 1.8;
 const MIRROR_SCALE = 2.2;
 const MIRROR_ALPHA = 180;
 const EDGE_MARGIN = 20; // minimum distance from any image edge to canvas border
+// 花色左右分布的带宽比例（相对于镜框内窗宽度）。数值越小，左右范围越窄
+const SUIT_X_BAND_RATIO = 0.30;
 // snap settings
 const SNAP_HOLD_FRAMES = 30;   // how many consecutive frames inside mask before snapping
 const SNAP_LERP = 0.15;        // how fast the suit moves to the target
@@ -142,9 +144,14 @@ function setup() {
     const maxX = ib.x + ib.w - renderRadius - EDGE_MARGIN;
     const minY = ib.y + renderRadius + EDGE_MARGIN;
     const maxY = ib.y + ib.h - renderRadius - EDGE_MARGIN;
+    // 花色的水平带：以内窗中心为中线，带宽 = ib.w * SUIT_X_BAND_RATIO
+    const cx = ib.x + ib.w / 2;
+    const halfBand = (ib.w * SUIT_X_BAND_RATIO) * 0.5;
+    const suitMinX = constrain(cx - halfBand, minX, maxX);
+    const suitMaxX = constrain(cx + halfBand, minX, maxX);
 
     balls.push({
-      x: random(minX, maxX),
+      x: (suit ? random(suitMinX, suitMaxX) : random(minX, maxX)),
       y: random(minY, maxY),
       baseRadius: baseR,
       radius: 0,
@@ -640,76 +647,78 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
       const maxX = ib.x + ib.w - r - EDGE_MARGIN;
       const minY = ib.y + r + EDGE_MARGIN;
       const maxY = ib.y + ib.h - r - EDGE_MARGIN;
-      
-      // 对花色使用更严格的分散策略
+     // 花色的水平带（与上面一致）
+     const cx = ib.x + ib.w / 2;
+     const halfBand = (ib.w * SUIT_X_BAND_RATIO) * 0.5;
+     const suitMinX = constrain(cx - halfBand, minX, maxX);
+     const suitMaxX = constrain(cx + halfBand, minX, maxX);
+
       if (b.suit) {
-        // suits：尝试找到离其他球最远的位置
-        let bestPos = { x: random(minX, maxX), y: random(minY, maxY) };
+        let bestPos = { x: random(suitMinX, suitMaxX), y: random(minY, maxY) };
         let bestMinDist = -Infinity;
-        const minDistanceThreshold = 150; // 减小距离阈值，让花色更容易分散
-         
-        for (let tries = 0; tries < 30; tries++) { // 增加尝试次数
-           const testX = random(minX, maxX);
+        const minDistanceThreshold = 150;
+        for (let tries = 0; tries < 30; tries++) {
+          const testX = random(suitMinX, suitMaxX);
            const testY = random(minY, maxY);
-           let minDistToOthers = Infinity;
-           
-           for (let j = 0; j < i; j++) {
-             const d = dist(testX, testY, balls[j].x, balls[j].y);
-             minDistToOthers = min(minDistToOthers, d);
-           }
-           
-           if (minDistToOthers > bestMinDist) {
-             bestMinDist = minDistToOthers;
-             bestPos = { x: testX, y: testY };
-           }
-         }
-         b.x = bestPos.x;
-         b.y = bestPos.y;
-       } else {
-         // 碎片：以镜框内窗中心为核心，均匀分布
-         const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
-         const centerX = ib.x + ib.w / 2;
-         const centerY = ib.y + ib.h / 2;
-         const spreadRadiusX = ib.w * 0.42; // 水平半径：内窗宽的 42%，增大以分散
-         const spreadRadiusY = ib.h * 0.42; // 竖直半径：内窗高的 42%，增大以分散
+          let minDistToOthers = Infinity;
+          
+          for (let j = 0; j < i; j++) {
+            const d = dist(testX, testY, balls[j].x, balls[j].y);
+            minDistToOthers = min(minDistToOthers, d);
+          }
+          
+          if (minDistToOthers > bestMinDist) {
+            bestMinDist = minDistToOthers;
+            bestPos = { x: testX, y: testY };
+          }
+        }
+        b.x = bestPos.x;
+        b.y = bestPos.y;
+      } else {
+        // 碎片：以镜框内窗中心为核心，均匀分布
+        const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
+        const centerX = ib.x + ib.w / 2;
+        const centerY = ib.y + ib.h / 2;
+        const spreadRadiusX = ib.w * 0.42; // 水平半径：内窗宽的 42%，增大以分散
+        const spreadRadiusY = ib.h * 0.42; // 竖直半径：内窗高的 42%，增大以分散
          
-         let bestPos = null;
-         let bestMinDist = -Infinity;
-         
-         for (let tries = 0; tries < 15; tries++) { // 增加尝试次数
-           // 改为在椭圆内均匀随机（使用 sqrt 校正距离分布）
-           const angle = random(TWO_PI);
-           const distance = sqrt(random(1)); // sqrt 使分布均匀（不会偏向中心）
-           const testX = centerX + cos(angle) * distance * spreadRadiusX;
-           const testY = centerY + sin(angle) * distance * spreadRadiusY;
-           
-           // 确保在镜框内
-           if (testX < minX || testX > maxX || testY < minY || testY > maxY) continue;
-           
-           let minDistToOthers = Infinity;
-           for (let j = 0; j < i; j++) {
-             const d = dist(testX, testY, balls[j].x, balls[j].y);
-             minDistToOthers = min(minDistToOthers, d);
-           }
-           
-           if (minDistToOthers > bestMinDist) {
-             bestMinDist = minDistToOthers;
-             bestPos = { x: testX, y: testY };
-           }
-         }
-         
-         if (bestPos) {
-           b.x = bestPos.x;
-           b.y = bestPos.y;
-         } else {
-           // 备选：若无法在中心附近找到位置，使用全范围随机
-           b.x = random(minX, maxX);
-           b.y = random(minY, maxY);
-         }
-       }
-        attempts++;
+        let bestPos = null;
+        let bestMinDist = -Infinity;
+        
+        for (let tries = 0; tries < 15; tries++) { // 增加尝试次数
+          // 改为在椭圆内均匀随机（使用 sqrt 校正距离分布）
+          const angle = random(TWO_PI);
+          const distance = sqrt(random(1)); // sqrt 使分布均匀（不会偏向中心）
+          const testX = centerX + cos(angle) * distance * spreadRadiusX;
+          const testY = centerY + sin(angle) * distance * spreadRadiusY;
+          
+          // 确保在镜框内
+          if (testX < minX || testX > maxX || testY < minY || testY > maxY) continue;
+          
+          let minDistToOthers = Infinity;
+          for (let j = 0; j < i; j++) {
+            const d = dist(testX, testY, balls[j].x, balls[j].y);
+            minDistToOthers = min(minDistToOthers, d);
+          }
+          
+          if (minDistToOthers > bestMinDist) {
+            bestMinDist = minDistToOthers;
+            bestPos = { x: testX, y: testY };
+          }
+        }
+        
+        if (bestPos) {
+          b.x = bestPos.x;
+          b.y = bestPos.y;
+        } else {
+          // 备选：若无法在中心附近找到位置，使用全范围随机
+          b.x = random(minX, maxX);
+          b.y = random(minY, maxY);
+        }
       }
+      attempts++;
     }
+  }
 }
 let transferred = false; // 新增：防止重复跳转
 
