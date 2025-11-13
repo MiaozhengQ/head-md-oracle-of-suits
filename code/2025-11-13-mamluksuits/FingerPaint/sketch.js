@@ -1,5 +1,7 @@
 let balls = [];
-let maxBalls = 8;  // 4 suits + 16 mirror pieces
+const SUIT_COUNT = 4;
+const MIRROR_COUNT = 4;   // 碎片数量（调小以减少碎片）
+let maxBalls = SUIT_COUNT + MIRROR_COUNT; // 总数 = 花色 + 碎片
 let lastTouchTime = 0;
 let touchCooldown = 300; // ms per-ball cooldown
 
@@ -29,6 +31,8 @@ const EDGE_MARGIN = 20; // minimum distance from any image edge to canvas border
 const SUIT_Y_BAND_TOP = 0.05;     // 扩大带宽：更靠近顶部
 const SUIT_Y_BAND_BOTTOM = 0.85;  // 扩大带宽：更靠近底部
 const SUIT_Y_GAP = 90;            // 花色之间的最小“垂直间距”（像素）
+// 控制花色出现的最高位置（0=内窗顶部，1=底部），比 SUIT_Y_BAND_TOP 更直观
+const SUIT_Y_TOP_LIMIT = 0.20;
 // snap settings
 const SNAP_HOLD_FRAMES = 30;   // how many consecutive frames inside mask before snapping
 const SNAP_LERP = 0.15;        // how fast the suit moves to the target
@@ -114,7 +118,7 @@ function setup() {
   initSuitTargets(); // compute snap targets based on current canvas size
 
   // shuffle suits so each appears exactly once
-  const suitsPool = shuffle(['diamond', 'club', 'heart', 'spade']);
+  const suitsPool = shuffle(['diamond', 'club', 'heart', 'spade']).slice(0, SUIT_COUNT);
 
   // create balls: one of each suit + plain circles
   for (let i = 0; i < maxBalls; i++) {
@@ -131,9 +135,11 @@ function setup() {
     const maxX = ib.x + ib.w - renderRadius - EDGE_MARGIN;
     const minY = ib.y + renderRadius + EDGE_MARGIN;
     const maxY = ib.y + ib.h - renderRadius - EDGE_MARGIN;
-    // 花色在可用带状区域内生成
-    const bandMinY = ib.y + ib.h * SUIT_Y_BAND_TOP  + renderRadius + EDGE_MARGIN;
-    const bandMaxY = ib.y + ib.h * SUIT_Y_BAND_BOTTOM - renderRadius - EDGE_MARGIN;
+    // 花色在可用带状区域内生成（限制最高位置为 SUIT_Y_TOP_LIMIT）
+    const rawTop = ib.y + ib.h * SUIT_Y_TOP_LIMIT + renderRadius + EDGE_MARGIN;
+    const rawBot = ib.y + ib.h * SUIT_Y_BAND_BOTTOM - renderRadius - EDGE_MARGIN;
+    const bandMinY = min(rawTop, rawBot);
+    const bandMaxY = max(rawTop, rawBot);
 
     // 采样位置：花色增加“垂直间距”约束
     let initX = random(minX, maxX);
@@ -626,8 +632,11 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
       const maxX = ib.x + ib.w - r - EDGE_MARGIN;
       const minY = ib.y + r + EDGE_MARGIN;
       const maxY = ib.y + ib.h - r - EDGE_MARGIN;
-      const bandMinY = ib.y + ib.h * SUIT_Y_BAND_TOP  + r + EDGE_MARGIN;
-      const bandMaxY = ib.y + ib.h * SUIT_Y_BAND_BOTTOM - r - EDGE_MARGIN;
+      // 花色在可用带状区域内生成（限制最高位置为 SUIT_Y_TOP_LIMIT）
+      const rawTop = ib.y + ib.h * SUIT_Y_TOP_LIMIT + r + EDGE_MARGIN;
+      const rawBot = ib.y + ib.h * SUIT_Y_BAND_BOTTOM - r - EDGE_MARGIN;
+      const bandMinY = min(rawTop, rawBot);
+      const bandMaxY = max(rawTop, rawBot);
 
       if (b.suit) {
         // 花色：在更宽垂直带内采样，并强制最小“垂直间距”
