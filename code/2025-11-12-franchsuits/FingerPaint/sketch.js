@@ -372,10 +372,34 @@ function currentRenderRadius(b) {
 }
 
 function clampBallInside(b) {
-  const r = currentRenderRadius(b);
-  const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
-  b.x = constrain(b.x, ib.x + r + EDGE_MARGIN, ib.x + ib.w - (r + EDGE_MARGIN));
-  b.y = constrain(b.y, ib.y + r + EDGE_MARGIN, ib.y + ib.h - (r + EDGE_MARGIN));
+  // 已锁定的 suit 不再约束（允许逃脱）
+  if (b.suit && b.locked) return;
+  
+  // 已逃脱的碎片也需要约束在屏幕内（可选：让它们完全自由则删除此段）
+  if (b.isMirror && b.escapedMask) {
+    // 已逃脱的碎片：限制在逃脱范围内（以镜框边界为中心，最多移动 ESCAPE_MAX_DISTANCE）
+    const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
+    const centerX = ib.x + ib.w / 2;
+    const centerY = ib.y + ib.h / 2;
+    const dist2center = dist(b.x, b.y, centerX, centerY);
+    
+    if (dist2center > ESCAPE_MAX_DISTANCE) {
+      // 超过逃脱距离，推回到边界
+      const angle = atan2(b.y - centerY, b.x - centerX);
+      b.x = centerX + cos(angle) * ESCAPE_MAX_DISTANCE;
+      b.y = centerY + sin(angle) * ESCAPE_MAX_DISTANCE;
+    }
+    
+    // 也限制离屏幕边缘的距离
+    b.x = constrain(b.x, ESCAPE_EDGE_MARGIN, width - ESCAPE_EDGE_MARGIN);
+    b.y = constrain(b.y, ESCAPE_EDGE_MARGIN, height - ESCAPE_EDGE_MARGIN);
+    return;
+  }
+   
+   const r = currentRenderRadius(b);
+   const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
+   b.x = constrain(b.x, ib.x + r + EDGE_MARGIN, ib.x + ib.w - (r + EDGE_MARGIN));
+   b.y = constrain(b.y, ib.y + r + EDGE_MARGIN, ib.y + ib.h - (r + EDGE_MARGIN));
 }
 
 function keepInsideAllBalls() {
@@ -446,27 +470,43 @@ function drawBallsToGraphics(g) {
         b.insideCount = (b.insideCount || 0) + 1;
         if (!b.snap && b.insideCount >= SNAP_HOLD_FRAMES) {
           b.snap = true;
-          // set random exit direction (outside canvas)
-          const angle = random(TWO_PI);
-          const distance = 500; // how far outside to move
-          b.targetX = indexPos.x + cos(angle) * distance;
-          b.targetY = indexPos.y + sin(angle) * distance;
-        }
-      } else {
-        b.insideCount = 0;
+          // snap 到圆心边缘附近（镜框内），然后锁定
+          const angle = atan2(indexPos.y - b.y, indexPos.x - b.x);
+          const snapRadius = INDEX_CIRCLE_RADIUS + 20;
+          b.targetX = indexPos.x + cos(angle) * snapRadius;
+          b.targetY = indexPos.y + sin(angle) * snapRadius;
+          // 夹紧目标到镜框内
+          const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
+          const r = currentRenderRadius(b);
+          b.targetX = constrain(b.targetX, ib.x + r, ib.x + ib.w - r);
+          b.targetY = constrain(b.targetY, ib.y + r, ib.y + ib.h - r);
+         }
+       } else {
+         b.insideCount = 0;
+       }
+       if (b.snap && b.targetX != null && b.targetY != null) {
+         b.x = lerp(b.x, b.targetX, SNAP_LERP);
+         b.y = lerp(b.y, b.targetY, SNAP_LERP);
+         // lock when very close; also disable interaction
+         if (dist(b.x, b.y, b.targetX, b.targetY) < 5) {
+           b.x = b.targetX;
+           b.y = b.targetY;
+           b.locked = true;
+           b.active = false;
+           b.snap = false;
+         }
+       }
+    }
+    
+    // 镜子碎片逃脱蒙版后，标记为 escapedMask（不再约束）
+    if (b.isMirror) {
+      if (inside) {
+        b.escapedMask = false; // 还在蒙版内，重置标记
+      } else if (!inside && b.escapedMask === false && b.wasInside) {
+        // 从蒙版内逃出
+        b.escapedMask = true;
       }
-      if (b.snap && b.targetX != null && b.targetY != null) {
-        b.x = lerp(b.x, b.targetX, SNAP_LERP);
-        b.y = lerp(b.y, b.targetY, SNAP_LERP);
-        // lock when very close; also disable interaction
-        if (dist(b.x, b.y, b.targetX, b.targetY) < 5) {
-          b.x = b.targetX;
-          b.y = b.targetY;
-          b.locked = true;
-          b.active = false;
-          b.snap = false;
-        }
-      }
+      if (b.escapedMask === undefined) b.escapedMask = false; // 初始化
     }
     
     // trigger pulse when entering the circle
@@ -567,15 +607,25 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
         }
       }
       if (!tooMuch) break;
-      // reposition
-      b.x = random(width * 0.1, width * 0.9);
-      b.y = random(height * 0.1, height * 0.9);
-      attempts++;
-    }
-  }
+      // reposition 在镜框内窗范围内
+      const r = currentRenderRadius(b);
+      const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
+      const minX = ib.x + r + EDGE_MARGIN;
+      const maxX = ib.x + ib.w - r - EDGE_MARGIN;
+      const minY = ib.y + r + EDGE_MARGIN;
+      const maxY = ib.y + ib.h - r - EDGE_MARGIN;
+      b.x = random(minX, maxX);
+      b.y = random(minY, maxY);
+       attempts++;
+     }
+   }
 }
 
 let transferred = false; // 新增：防止重复跳转
+
+// 逃脱碎片的距离控制
+const ESCAPE_MAX_DISTANCE = 2000;  // 碎片逃出后离镜框中心的最大距离（像素）
+const ESCAPE_EDGE_MARGIN = 30;     // 逃脱碎片离屏幕边缘的最小距离
 
 // 基于 mask 计算镜框内窗的内接矩形
 function computeFrameInnerBounds() {
@@ -600,14 +650,15 @@ function computeFrameInnerBounds() {
     }
   }
   if (maxX >= minX && maxY >= minY) {
-    // 扩一点点保证内缩不贴边
-    const pad = 6;
-    minX = constrain(minX + pad, 0, width);
-    minY = constrain(minY + pad, 0, height);
-    maxX = constrain(maxX - pad, 0, width);
-    maxY = constrain(maxY - pad, 0, height);
+    // 分别调整水平和竖直的内缩距离
+    const padHorizontal = 210; // 左右内缩距离
+    const padVertical = 210;   // 上下内缩距离
+    minX = constrain(minX + padHorizontal, 0, width);
+    minY = constrain(minY + padVertical, 0, height);
+    maxX = constrain(maxX - padHorizontal, 0, width);
+    maxY = constrain(maxY - padVertical, 0, height);
     frameInnerBounds = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-  } else {
-    frameInnerBounds = { x: 0, y: 0, w: width, h: height };
-  }
+   } else {
+     frameInnerBounds = { x: 0, y: 0, w: width, h: height };
+   }
 }
