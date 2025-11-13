@@ -110,27 +110,7 @@ function setup() {
   mainG.pixelDensity(1);
   mainG.colorMode(HSB, 255);
 
-  // 生成"内窗为白"的遮罩（基于 frame.png，使用 copy 保证尺寸与像素密度一致）
-  if (frameImg && frameImg.width > 0) {
-    const scaledFrame = createImage(width, height);
-    scaledFrame.copy(frameImg, 0, 0, frameImg.width, frameImg.height, 0, 0, width, height);
-    scaledFrame.loadPixels();
-    frameMaskImg = createImage(width, height);
-    frameMaskImg.loadPixels();
-    for (let i = 0; i < scaledFrame.pixels.length; i += 4) {
-      const a = scaledFrame.pixels[i + 3];
-      const m = 255 - a; // 中心透明(0)->255，边框不透明(255)->0
-      // p5.Image.mask 使用的是 mask 的 alpha 通道
-      frameMaskImg.pixels[i]     = 255; // RGB 随意
-      frameMaskImg.pixels[i + 1] = 255;
-      frameMaskImg.pixels[i + 2] = 255;
-      frameMaskImg.pixels[i + 3] = m;   // 关键：alpha = m（白=保留，黑=裁切）
-    }
-    frameMaskImg.updatePixels();
-    frameMaskReady = true;
-    computeFrameInnerBounds(); // 基于 mask 计算镜框内窗的内接矩形
-  }
-
+  buildFrameMask();
   initSuitTargets(); // compute snap targets based on current canvas size
 
   // shuffle suits so each appears exactly once
@@ -217,26 +197,7 @@ function windowResized() {
    mainG.pixelDensity(1);
    mainG.colorMode(HSB, 255);
   
-  // 重新生成 frame mask
-  if (frameImg && frameImg.width > 0) {
-    const scaledFrame = createImage(width, height);
-    scaledFrame.copy(frameImg, 0, 0, frameImg.width, frameImg.height, 0, 0, width, height);
-    scaledFrame.loadPixels();
-    frameMaskImg = createImage(width, height);
-    frameMaskImg.loadPixels();
-    for (let i = 0; i < scaledFrame.pixels.length; i += 4) {
-      const a = scaledFrame.pixels[i + 3];
-      const m = 255 - a;
-      frameMaskImg.pixels[i]     = 255;
-      frameMaskImg.pixels[i + 1] = 255;
-      frameMaskImg.pixels[i + 2] = 255;
-      frameMaskImg.pixels[i + 3] = m;
-    }
-    frameMaskImg.updatePixels();
-    frameMaskReady = true;
-    computeFrameInnerBounds();
-  }
-  
+  buildFrameMask();
   initSuitTargets();
   // refresh target positions for suits
   for (const b of balls) {
@@ -382,9 +343,7 @@ function draw() {
   }
   // 把裁剪后的内容画到主画布
   image(composed, 0, 0);
-  if (frameImg && frameImg.width > 0) {
-    image(frameImg, 0, 0, width, height); // 最上层相框装饰
-  }
+  drawFrame(); // 按比例居中绘制，不压缩
 
   // 显示文字提示
   push();
@@ -759,13 +718,10 @@ function computeFrameInnerBounds() {
   }
   frameMaskImg.loadPixels();
   let minX = width, maxX = -1, minY = height, maxY = -1;
-  // 采样步长（加快扫描，越小越精确）
-  const step = 2;
-  for (let y = 0; y < height; y += step) {
-    for (let x = 0; x < width; x += step) {
+  for (let y = 0; y < height; y += 2) {
+    for (let x = 0; x < width; x += 2) {
       const idx = 4 * (y * width + x);
-      const a = frameMaskImg.pixels[idx + 3]; // alpha
-      if (a > 10) { // 在保留区域内
+      if (frameMaskImg.pixels[idx + 3] > 10) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -774,15 +730,96 @@ function computeFrameInnerBounds() {
     }
   }
   if (maxX >= minX && maxY >= minY) {
-    // 分别调整水平和竖直的内缩距离
-    const padHorizontal = 100; // 左右内缩距离，减小以平衡左右
-    const padVertical = 100;   // 上下内缩距离
-     minX = constrain(minX + padHorizontal, 0, width);
-     minY = constrain(minY + padVertical, 0, height);
-     maxX = constrain(maxX - padHorizontal, 0, width);
-     maxY = constrain(maxY - padVertical, 0, height);
-     frameInnerBounds = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-    } else {
-      frameInnerBounds = { x: 0, y: 0, w: width, h: height };
+    const padH = 40; // 原来 100 太挤
+    const padV = 40;
+    minX = constrain(minX + padH, 0, width);
+    minY = constrain(minY + padV, 0, height);
+    maxX = constrain(maxX - padH, 0, width);
+    maxY = constrain(maxY - padV, 0, height);
+    frameInnerBounds = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  } else {
+    frameInnerBounds = { x: 0, y: 0, w: width, h: height };
+  }
+}
+
+function computeFramePlacement() {
+  if (!frameImg || frameImg.width === 0) return { dx: 0, dy: 0, drawW: width, drawH: height };
+  const fw = frameImg.width, fh = frameImg.height;
+  const s = Math.min(width / fw, height / fh); // 等比，不压缩
+  const drawW = Math.round(fw * s);
+  const drawH = Math.round(fh * s);
+  const dx = Math.round((width - drawW) / 2);
+  const dy = Math.round((height - drawH) / 2);
+  return { dx, dy, drawW, drawH };
+}
+
+function buildFrameMask() {
+  if (!frameImg || frameImg.width === 0) return;
+  const { dx, dy, drawW, drawH } = computeFramePlacement();
+  const g = createGraphics(width, height);
+  g.clear();
+  g.image(frameImg, dx, dy, drawW, drawH); // 按比例居中绘制，不拉伸
+  const frameCanvas = g.get();
+  frameCanvas.loadPixels();
+
+  // 统计透明像素数量
+  let transparentCount = 0;
+  for (let i = 0; i < frameCanvas.pixels.length; i += 4) {
+    if (frameCanvas.pixels[i + 3] < 15) transparentCount++;
+  }
+
+  frameMaskImg = createImage(width, height);
+  frameMaskImg.loadPixels();
+
+  if (transparentCount > 500) {
+    // 有透明孔：反转 alpha——透明处露出内容（白）
+    for (let i = 0; i < frameCanvas.pixels.length; i += 4) {
+      const a = frameCanvas.pixels[i + 3];
+      const m = 255 - a;
+      frameMaskImg.pixels[i]     = 255;
+      frameMaskImg.pixels[i + 1] = 255;
+      frameMaskImg.pixels[i + 2] = 255;
+      frameMaskImg.pixels[i + 3] = m;
     }
+  } else if (USE_COLOR_BASED_MASK) {
+    // 无透明孔：用白色区域作为可见窗口（简化：直接检测亮度）
+    for (let i = 0; i < frameCanvas.pixels.length; i += 4) {
+      const r = frameCanvas.pixels[i];
+      const gC = frameCanvas.pixels[i + 1];
+      const b = frameCanvas.pixels[i + 2];
+      const isWhite = (r >= WHITE_VISIBILITY_THRESHOLD &&
+                      gC >= WHITE_VISIBILITY_THRESHOLD &&
+                      b >= WHITE_VISIBILITY_THRESHOLD);
+      frameMaskImg.pixels[i]     = 255;
+      frameMaskImg.pixels[i + 1] = 255;
+      frameMaskImg.pixels[i + 2] = 255;
+      frameMaskImg.pixels[i + 3] = isWhite ? 255 : 0;
+    }
+  } else {
+    // 回退：矩形窗口
+    const innerX = Math.round(dx + drawW * FALLBACK_PAD_X_RATIO);
+    const innerY = Math.round(dy + drawH * FALLBACK_PAD_Y_RATIO);
+    const innerW = Math.round(drawW * (1 - 2 * FALLBACK_PAD_X_RATIO));
+    const innerH = Math.round(drawH * (1 - 2 * FALLBACK_PAD_Y_RATIO));
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = 4 * (y * width + x);
+        const inside = (x >= innerX && x < innerX + innerW && y >= innerY && y < innerY + innerH);
+        frameMaskImg.pixels[idx]     = 255;
+        frameMaskImg.pixels[idx + 1] = 255;
+        frameMaskImg.pixels[idx + 2] = 255;
+        frameMaskImg.pixels[idx + 3] = inside ? 255 : 0;
+      }
+    }
+  }
+
+  frameMaskImg.updatePixels();
+  frameMaskReady = true;
+  computeFrameInnerBounds(); // 基于 mask 重算可用区域
+}
+
+function drawFrame() {
+  if (!frameImg || frameImg.width === 0) return;
+  const { dx, dy, drawW, drawH } = computeFramePlacement();
+  image(frameImg, dx, dy, drawW, drawH);
 }
