@@ -63,6 +63,44 @@ let baselineFingerZ = [];            // per-hand baseline z to detect approach
 const DEPTH_THRESHOLD = 0.08;        // z-delta required to consider "approach" (tune)
 const PICK_RADIUS = 140;             // px radius to search nearest ball when approach happens
 const RELEASE_DEPTH_FACTOR = 0.5;    // fraction of DEPTH_THRESHOLD below which to release
+// 仅检测右手，忽略左手
+const SELECT_RIGHT_HAND_ONLY = true;
+// 左手警告的纵向位置（0 顶部，1 底部）
+const LEFT_HAND_WARNING_Y = 0.42;
+
+// 判断第 h 只手是否为右手（兼容多种结果结构）
+function isRightHand(h) {
+  if (typeof detections !== 'object' || !detections) return false;
+  const mh = detections.multiHandedness;
+  if (mh && mh[h]) {
+    const c = mh[h].classification || mh[h].classifications || mh[h];
+    const lbl = (Array.isArray(c) ? c[0]?.label : c?.label) || '';
+    if (lbl) return lbl.toLowerCase().includes('right');
+  }
+  const hs = detections.handednesses;
+  if (hs && hs[h] && hs[h][0]) {
+    const lbl = hs[h][0].categoryName || hs[h][0].displayName || '';
+    if (lbl) return lbl.toLowerCase().includes('right');
+  }
+  return h === 0;
+}
+
+// 判断是否为左手（用于提示）
+function isLeftHand(h) {
+  if (typeof detections !== 'object' || !detections) return false;
+  const mh = detections.multiHandedness;
+  if (mh && mh[h]) {
+    const c = mh[h].classification || mh[h].classifications || mh[h];
+    const lbl = (Array.isArray(c) ? c[0]?.label : c?.label) || '';
+    if (lbl) return lbl.toLowerCase().includes('left');
+  }
+  const hs = detections.handednesses;
+  if (hs && hs[h] && hs[h][0]) {
+    const lbl = hs[h][0].categoryName || hs[h][0].displayName || '';
+    if (lbl) return lbl.toLowerCase().includes('left');
+  }
+  return false;
+}
 
 function initSuitTargets() {
   // keep targets inside frame inner window
@@ -254,67 +292,80 @@ function draw() {
 
   strokeWeight(2);
 
+  // 检测是否出现左手，用于显示提示
+  let leftHandDetected = false;
+  if (detections && detections.multiHandLandmarks && detections.multiHandLandmarks.length) {
+    for (let h = 0; h < detections.multiHandLandmarks.length; h++) {
+      if (isLeftHand(h)) { leftHandDetected = true; break; }
+    }
+  }
+
   if (detections) {
     for (let h = 0; h < detections.multiHandLandmarks.length; h++) {
+      if (SELECT_RIGHT_HAND_ONLY && !isRightHand(h)) continue;
       const hand = detections.multiHandLandmarks[h];
 
-      // update indexPos (center of moving circle)
-      drawIndex(hand);
-      
-      // draw hand connections INTO circleG
-      drawConnectionsToGraphics(hand, circleG);
+       // update indexPos (center of moving circle)
+       drawIndex(hand);
+       
+       // draw hand connections INTO circleG
+       drawConnectionsToGraphics(hand, circleG);
 
-      const m = hand[FINGER_TIPS.index];
-      if (m) {
-        const ix = m.x * width;
-        const iy = m.y * height;
-        const z = (typeof m.z === 'number') ? m.z : 0;
+       const m = hand[FINGER_TIPS.index];
+       if (m) {
+         const ix = m.x * width;
+         const iy = m.y * height;
+         const z = (typeof m.z === 'number') ? m.z : 0;
 
-        if (baselineFingerZ[h] == null) baselineFingerZ[h] = z;
+         if (baselineFingerZ[h] == null) baselineFingerZ[h] = z;
 
-        const dz = baselineFingerZ[h] - z;
-        const approached = dz > DEPTH_THRESHOLD;
+         const dz = baselineFingerZ[h] - z;
+         const approached = dz > DEPTH_THRESHOLD;
 
-        if (!approached) baselineFingerZ[h] = lerp(baselineFingerZ[h], z, 0.02);
+         if (!approached) baselineFingerZ[h] = lerp(baselineFingerZ[h], z, 0.02);
 
-        if (selectedBall === -1) {
-          for (let bi = 0; bi < balls.length; bi++) {
-            const b = balls[bi];
-            if (!b.active) continue;
-            const d = dist(ix, iy, b.x, b.y);
-            if (d <= b.radius && approached && (millis() - b.lastTouched > touchCooldown)) {
-               selectedBall = bi;
-               selectedHand = h;
-               dragOffsetX = b.x - ix;
-               dragOffsetY = b.y - iy;
-               b.lastTouched = millis();
-               b.color = color(random(255), 220, 220);
-               b.radius += 12;
-               setTimeout(() => { b.radius = max(b.baseRadius, b.radius - 12); }, 160);
-               break;
-             }
+         if (selectedBall === -1) {
+           for (let bi = 0; bi < balls.length; bi++) {
+             const b = balls[bi];
+             if (!b.active) continue;
+             const d = dist(ix, iy, b.x, b.y);
+             if (d <= b.radius && approached && (millis() - b.lastTouched > touchCooldown)) {
+                selectedBall = bi;
+               selectedHand = h; // 右手索引（如索引变动，见下方 handMatches）
+                dragOffsetX = b.x - ix;
+                dragOffsetY = b.y - iy;
+                b.lastTouched = millis();
+                b.color = color(random(255), 220, 220);
+                b.radius += 12;
+                setTimeout(() => { b.radius = max(b.baseRadius, b.radius - 12); }, 160);
+                break;
+              }
+            }
+         } else if (selectedBall !== -1) {
+           // 仅右手生效；右手索引在多手时可能变化，这里不再强制匹配索引
+           const handMatches = SELECT_RIGHT_HAND_ONLY ? true : (selectedHand === h);
+           if (handMatches) {
+              const b = balls[selectedBall];
+              if (b) {
+                b.x = ix + dragOffsetX;
+                b.y = iy + dragOffsetY;
+
+                const releaseByDepth = dz < (DEPTH_THRESHOLD * RELEASE_DEPTH_FACTOR);
+                const d2 = dist(ix, iy, b.x, b.y);
+                const releaseByDist = d2 > RELEASE_DISTANCE;
+                if (releaseByDepth || releaseByDist) {
+                  b.radius = b.baseRadius;
+                  selectedBall = -1;
+                  selectedHand = -1;
+                }
+              } else {
+                selectedBall = -1;
+                selectedHand = -1;
+              }
            }
-         } else if (selectedBall !== -1 && selectedHand === h) {
-           const b = balls[selectedBall];
-           if (b) {
-             b.x = ix + dragOffsetX;
-             b.y = iy + dragOffsetY;
- 
-             const releaseByDepth = dz < (DEPTH_THRESHOLD * RELEASE_DEPTH_FACTOR);
-             const d2 = dist(ix, iy, b.x, b.y);
-             const releaseByDist = d2 > RELEASE_DISTANCE;
-             if (releaseByDepth || releaseByDist) {
-               b.radius = b.baseRadius;
-               selectedBall = -1;
-               selectedHand = -1;
-             }
-           } else {
-             selectedBall = -1;
-             selectedHand = -1;
-           }
-         }
-       }
-     }
+          }
+        }
+      }
   }
 
   if (selectedBall !== -1) {
@@ -356,9 +407,6 @@ function draw() {
     mainG.strokeWeight(2);
     mainG.circle(indexPos.x, indexPos.y, INDEX_CIRCLE_RADIUS * 2);
     mainG.pop();
-  } else {
-    // 没有手势时也显示内容，便于调试
-    mainG.image(circleG, 0, 0);
   }
 
   // 先清空主画布，避免上帧残留在蒙版外
@@ -378,11 +426,22 @@ function draw() {
   push();
   fill(0, 0, 255); // 白色（HSB 模式：H,S,B）
   textSize(18);
-  //显示在镜子中间
- //向上移动一点
   textAlign(CENTER, CENTER);
   text('Please find the suits to fix the mirror', width / 2, height / 2 - 100);
   pop();
+
+  // 左手警告：红色加粗，置于画面中间偏下
+  if (leftHandDetected) {
+    push();
+    textAlign(CENTER, CENTER);
+    const ts = Math.max(22, Math.min(width, height) * 0.002);
+    textSize(18);
+    stroke(0, 200);
+    strokeWeight(ts * 0.1);
+    fill(0, 360, 360); // 红色（HSB）
+    text('please use your right hand', width / 2, height * LEFT_HAND_WARNING_Y);
+    pop();
+  }
 
   // --- after existing rendering / logic ---
   if (!transferred) {

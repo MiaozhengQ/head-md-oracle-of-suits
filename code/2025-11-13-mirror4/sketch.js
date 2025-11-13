@@ -1,12 +1,15 @@
 let img, frameImg, maskedImg, maskImg;
-let firstpiece; // 新增：要画到 back-board 上的“房子”图片
-let secondpiece; // 新增：secondpiece
+let firstpiece, secondpiece, thirdpiece;
+let forthpiece; // 新增：forthpiece
 let imagesReady = false;
 
 // 页面跳转设置
-const REDIRECT_URL = 'http://127.0.0.1:5500/code/2025-11-13-spainsuits/FingerPaint/index.html';
-const REDIRECT_DELAY_MS = 3000; // 3 秒
-let redirectScheduled = false;
+// 显示祝贺文字
+const SHOW_CONGRATS = true;
+const CONGRATS_TEXT = 'Congratulation!\nYou made it!';//上下换行
+// 文字位置与大小（相对画面）
+const CONGRATS_Y_RATIO = 0.52;     // 0.5 表示居中，0 顶部，1 底部
+const CONGRATS_SIZE_RATIO = 0.035; // 字号占短边比例（调大更醒目）
 
 let w, h; // mask/frame 大小
 let bbox = {}; // {minX,minY,maxX,maxY,bboxW,bboxH,drawX,drawY,drawW,drawH}
@@ -17,6 +20,8 @@ function preload() {
   frameImg = loadImage('assets/frame.png'); // 用作蒙版并叠加显示
   firstpiece = loadImage('assets/firstpiece.png'); // 新增：房子图片
   secondpiece = loadImage('assets/secondpiece.png'); // 新增：secondpiece
+  thirdpiece = loadImage('assets/thirdpiece.png');  // 新增：thirdpiece
+  forthpiece = loadImage('assets/forthpiece.png'); // 新增：forthpiece
 }
 
 function setup() {
@@ -202,6 +207,14 @@ function draw() {
     if (secondpiece && secondpiece.width > 0) {
       g.image(secondpiece, fpX, fpY, fpW, fpH);
     }
+    // 若有 thirdpiece，同样按相同的尺寸与位置绘制
+    if (thirdpiece && thirdpiece.width > 0) {
+      g.image(thirdpiece, fpX, fpY, fpW, fpH);
+    }
+    // 在绘制 pieces 的位置处追加 forthpiece（使用与 fpX/fpY/fpW/fpH 相同的对齐）
+    if (forthpiece && forthpiece.width > 0) {
+      g.image(forthpiece, fpX, fpY, fpW, fpH);
+    }
   }
 
   let temp = g.get();
@@ -218,6 +231,22 @@ function draw() {
 
   // 叠加原始 frame（保留边框视觉）
   image(frameImg, dx, dy, dw, dh);
+
+  // 叠加祝贺文字
+  if (SHOW_CONGRATS) {
+    push();
+    textAlign(CENTER, CENTER);
+    const ts = Math.max(24, Math.min(width, height) * CONGRATS_SIZE_RATIO);
+    textSize(ts);
+    // 黑色描边 + 白色填充，增强可读性
+    stroke(0, 180);
+    strokeWeight(ts * 0.14);
+    fill(255);
+    const tx = dx + dw / 2;
+    const ty = dy + dh * CONGRATS_Y_RATIO; // 垂直居中
+    text(CONGRATS_TEXT, tx, ty);
+    pop();
+  }
 
   // 首次成功绘制后安排跳转（仅一次）
   if (!redirectScheduled) {

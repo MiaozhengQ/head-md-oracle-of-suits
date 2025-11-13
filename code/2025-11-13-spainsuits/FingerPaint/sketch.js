@@ -382,7 +382,7 @@ function draw() {
       try { localStorage.setItem('foundSuits', JSON.stringify(suitsData)); } catch(e) { /* ignore */ }
 
       // 跳转到目标页面（根据你的项目结构调整 URL）
-      const redirectUrl = 'http://127.0.0.1:5500/code/2025-11-12-mirror1/index.html';
+      const redirectUrl = 'http://127.0.0.1:5500/code/2025-11-13-mirror3/index.html';
       // 若你希望在同一窗口打开，使用 location.href；若新窗口使用 window.open
       window.location.href = redirectUrl;
       // window.open(redirectUrl, '_blank');

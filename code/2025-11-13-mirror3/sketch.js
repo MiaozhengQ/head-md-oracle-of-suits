@@ -1,10 +1,11 @@
 let img, frameImg, maskedImg, maskImg;
 let firstpiece; // 新增：要画到 back-board 上的“房子”图片
 let secondpiece; // 新增：secondpiece
+let thirdpiece;  // 新增：thirdpiece
 let imagesReady = false;
 
 // 页面跳转设置
-const REDIRECT_URL = 'http://127.0.0.1:5500/code/2025-11-13-spainsuits/FingerPaint/index.html';
+const REDIRECT_URL = 'http://127.0.0.1:5500/code/2025-11-13-mamluksuits/FingerPaint/index.html';
 const REDIRECT_DELAY_MS = 3000; // 3 秒
 let redirectScheduled = false;
 
@@ -17,6 +18,7 @@ function preload() {
   frameImg = loadImage('assets/frame.png'); // 用作蒙版并叠加显示
   firstpiece = loadImage('assets/firstpiece.png'); // 新增：房子图片
   secondpiece = loadImage('assets/secondpiece.png'); // 新增：secondpiece
+  thirdpiece = loadImage('assets/thirdpiece.png');  // 新增：thirdpiece
 }
 
 function setup() {
@@ -201,6 +203,10 @@ function draw() {
     // 若有 secondpiece，则按与 firstpiece 相同的尺寸与位置（居中）绘制
     if (secondpiece && secondpiece.width > 0) {
       g.image(secondpiece, fpX, fpY, fpW, fpH);
+    }
+    // 若有 thirdpiece，同样按相同的尺寸与位置绘制
+    if (thirdpiece && thirdpiece.width > 0) {
+      g.image(thirdpiece, fpX, fpY, fpW, fpH);
     }
   }
 
