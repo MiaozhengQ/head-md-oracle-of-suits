@@ -643,28 +643,48 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
       
       // 对花色使用更严格的分散策略
       if (b.suit) {
-        // suits：尝试找到离其他球最远的位置
-        let bestPos = { x: random(minX, maxX), y: random(minY, maxY) };
-        let bestMinDist = -Infinity;
-        const minDistanceThreshold = 150; // 减小距离阈值，让花色更容易分散
+        // suits：在镜框内窗中心附近随机分布（比碎片更靠近中心）
+        const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
+        const centerX = ib.x + ib.w / 2;
+        const centerY = ib.y + ib.h / 2;
+        const suitSpreadRadiusX = ib.w * 0.18; // 花色水平半径，更小 = 更靠近中心
+        const suitSpreadRadiusY = ib.h * 0.18; // 花色竖直半径，更小 = 更靠近中心
          
-        for (let tries = 0; tries < 30; tries++) { // 增加尝试次数
-           const testX = random(minX, maxX);
-           const testY = random(minY, maxY);
-           let minDistToOthers = Infinity;
+        let bestPos = null;
+        let bestMinDist = -Infinity;
+        const minDistanceThreshold = 150;
+          
+        for (let tries = 0; tries < 30; tries++) {
+           // 花色在中心附近的椭圆区域内生成
+           const angle = random(TWO_PI);
+           const distance = sqrt(random(1));
+           const testX = centerX + cos(angle) * distance * suitSpreadRadiusX;
+           const testY = centerY + sin(angle) * distance * suitSpreadRadiusY;
            
-           for (let j = 0; j < i; j++) {
-             const d = dist(testX, testY, balls[j].x, balls[j].y);
-             minDistToOthers = min(minDistToOthers, d);
-           }
+           // 确保在镜框内
+           if (testX < minX || testX > maxX || testY < minY || testY > maxY) continue;
            
-           if (minDistToOthers > bestMinDist) {
-             bestMinDist = minDistToOthers;
-             bestPos = { x: testX, y: testY };
-           }
+            let minDistToOthers = Infinity;
+            
+            for (let j = 0; j < i; j++) {
+              const d = dist(testX, testY, balls[j].x, balls[j].y);
+              minDistToOthers = min(minDistToOthers, d);
+            }
+            
+            if (minDistToOthers > bestMinDist) {
+              bestMinDist = minDistToOthers;
+              bestPos = { x: testX, y: testY };
+            }
+          }
+         
+         if (bestPos) {
+           b.x = bestPos.x;
+           b.y = bestPos.y;
+         } else {
+           // 备选：若无法在中心附近找到位置，使用全范围随机
+           b.x = random(minX, maxX);
+           b.y = random(minY, maxY);
          }
-         b.x = bestPos.x;
-         b.y = bestPos.y;
        } else {
          // 碎片：以镜框内窗中心为核心，均匀分布
          const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
