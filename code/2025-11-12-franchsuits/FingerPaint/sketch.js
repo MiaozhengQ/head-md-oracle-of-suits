@@ -12,6 +12,10 @@ let cnv = null;
 
 // --- moving canvas circle setup ---
 let circleG; // offscreen graphics for circular canvas
+let mainG;  // 主 offscreen，把所有内容先画到这里
+let frameImg; // 最外围蒙版 frame.png（素材相框）
+let frameMaskImg = null; // 由 frame.png 反转 alpha 生成的遮罩（白=保留，黑=裁切）
+let frameMaskReady = false;
 const INDEX_CIRCLE_RADIUS = 90;
 let indexPos = null; // position of index finger circle
 let canvasBG; // background color
@@ -36,6 +40,8 @@ function preload() {
   for (let i = 1; i <= 4; i++) {
     mirrorImgs.push(loadImage(`assets/mirror${i}.png`));
   }
+  // 加载最外层蒙版图片（需与画布同尺寸或按画布缩放）
+  frameImg = loadImage('assets/frame.png');
 }
 
 // selection / dragging state
@@ -57,7 +63,7 @@ function initSuitTargets() {
   const leftX   = EDGE_MARGIN + TARGET_PAD;
   const rightX  = width - (EDGE_MARGIN + TARGET_PAD);
   const topY    = EDGE_MARGIN + TARGET_PAD;
-  const bottomY = height - (EDGE_MARGIN - TARGET_PAD);
+  const bottomY = height - (EDGE_MARGIN + TARGET_PAD); // 修正：用加号
   const midX = width / 2;
   const midY = height / 2;
   suitTargets = {
@@ -74,23 +80,49 @@ function setup() {
   setupHands();
   setupVideo();
   colorMode(HSB, 255);
-  
+
   // set canvas background color
   canvasBG = color(210, 80, 30);
   // set mask color (HSB: hue, saturation, brightness, alpha)
   maskColor = color(150, 100, 200, 120); // tweak these values
-  
+
   circleG = createGraphics(width, height);
+  mainG = createGraphics(width, height);
+  mainG.pixelDensity(1);
+  mainG.colorMode(HSB, 255);
+
+  // 基于 frame.png 生成“内窗为白”的遮罩（一次性）
+  if (frameImg && frameImg.width > 0) {
+    const tmp = createGraphics(width, height);
+    tmp.clear();
+    // 拉伸到画布大小（确保尺寸匹配）
+    tmp.image(frameImg, 0, 0, width, height);
+    tmp.loadPixels();
+    frameMaskImg = createImage(width, height);
+    frameMaskImg.loadPixels();
+    // 反转 alpha：mask = 255 - alpha(frame)
+    for (let i = 0; i < tmp.pixels.length; i += 4) {
+      const a = tmp.pixels[i + 3];
+      const m = 255 - a; // 中心透明(0) -> 255(保留)，边框不透明(255) -> 0(裁切)
+      frameMaskImg.pixels[i] = m;
+      frameMaskImg.pixels[i + 1] = m;
+      frameMaskImg.pixels[i + 2] = m;
+      frameMaskImg.pixels[i + 3] = 255;
+    }
+    frameMaskImg.updatePixels();
+    frameMaskReady = true;
+  }
+
   initSuitTargets(); // compute snap targets based on current canvas size
-  
+
   // shuffle suits so each appears exactly once
   const suitsPool = shuffle(['diamond', 'club', 'heart', 'spade']);
-  
+
   // create balls: one of each suit + plain circles
   for (let i = 0; i < maxBalls; i++) {
     const suit = (i < suitsPool.length) ? suitsPool[i] : null;
     const mirrorIndex = (suit === null) ? ((i - suitsPool.length) % mirrorImgs.length) : -1;
-    
+
     const baseR = random(20, 60);
     // pre‑compute max rendered radius for proper initial placement
     const renderRadius = suit
@@ -100,7 +132,7 @@ function setup() {
     const maxX = width - renderRadius - EDGE_MARGIN;
     const minY = renderRadius + EDGE_MARGIN;
     const maxY = height - renderRadius - EDGE_MARGIN;
-    
+
     balls.push({
       x: random(minX, maxX),
       y: random(minY, maxY),
@@ -153,9 +185,11 @@ function centerCanvas() {
 }
  
 function draw() {
-  background(canvasBG);
+  // 先清空并绘制到 offscreen
+  mainG.clear();
+  mainG.background(canvasBG);
   circleG.clear();
-  
+
   if (isVideoReady()) {
     // video ready
   }
@@ -246,31 +280,37 @@ function draw() {
   // draw balls INTO circleG
   drawBallsToGraphics(circleG);
 
-  // --- render circular mask on main canvas ---
+  // --- render circular mask into mainG ---
   if (indexPos) {
-    // enable clipping for circular region
-    push();
-    drawingContext.beginPath();
-    drawingContext.arc(indexPos.x, indexPos.y, INDEX_CIRCLE_RADIUS, 0, TWO_PI);
-    drawingContext.clip();
+    mainG.push();
+    mainG.drawingContext.beginPath();
+    mainG.drawingContext.arc(indexPos.x, indexPos.y, INDEX_CIRCLE_RADIUS, 0, TWO_PI);
+    mainG.drawingContext.clip();
+    mainG.noStroke();
+    mainG.fill(currentMaskColor);
+    mainG.rect(0, 0, width, height);
+    mainG.image(circleG, 0, 0);
+    mainG.pop();
+    // 可选轮廓
+    mainG.push();
+    mainG.noFill();
+    mainG.stroke(0, 255, 255);
+    mainG.strokeWeight(2);
+    mainG.circle(indexPos.x, indexPos.y, INDEX_CIRCLE_RADIUS * 2);
+    mainG.pop();
+  } else {
+    // 没有手势时也显示内容，便于调试
+    mainG.image(circleG, 0, 0);
+  }
 
-    // fill the clipped area with mask color BEFORE drawing content
-    noStroke();
-    fill(currentMaskColor);
-    rect(0, 0, width, height);
-
-    // draw the offscreen graphics (only visible inside circle)
-    image(circleG, 0, 0);
-
-    pop();
-
-    // optional: draw circle outline
-    push();
-    noFill();
-    stroke(0, 255, 255);
-    strokeWeight(2);
-    circle(indexPos.x, indexPos.y, INDEX_CIRCLE_RADIUS * 2);
-    pop();
+  // 方式改为：先用反转 mask 裁剪 mainG，再叠加 frame 装饰
+  let composed = mainG.get(); // p5.Image
+  if (frameMaskReady && frameMaskImg) {
+    composed.mask(frameMaskImg); // 白=保留，黑=裁切
+  }
+  image(composed, 0, 0);
+  if (frameImg && frameImg.width > 0) {
+    image(frameImg, 0, 0, width, height); // 最上层相框装饰
   }
 
   // --- after existing rendering / logic ---
