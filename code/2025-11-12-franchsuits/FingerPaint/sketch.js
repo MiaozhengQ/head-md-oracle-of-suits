@@ -156,6 +156,7 @@ function setup() {
       insideCount: 0,
       snap: false,
       locked: false,
+      escapedMask: false, // 新增：碎片是否逃出食指蒙版
       targetX: suit ? suitTargets[suit].x : undefined,
       targetY: suit ? suitTargets[suit].y : undefined
     });
@@ -293,10 +294,10 @@ function draw() {
   }
 
   // check if any suit is inside the mask
-  let suitInsideMask = false;
+  let suitInsideMask = false; // 仅检查 suits，不检查 mirrors
   if (indexPos) {
     for (const b of balls) {
-      if (b.suit && dist(b.x, b.y, indexPos.x, indexPos.y) <= INDEX_CIRCLE_RADIUS) {
+      if (b.suit && !b.isMirror && dist(b.x, b.y, indexPos.x, indexPos.y) <= INDEX_CIRCLE_RADIUS) {
         suitInsideMask = true;
         break;
       }
@@ -450,6 +451,17 @@ function drawBallsToGraphics(g) {
     const drawPos = clampPointToInnerBounds(b.x + rx, b.y + ry, renderR);
     
     const inside = indexPos && dist(b.x, b.y, indexPos.x, indexPos.y) <= INDEX_CIRCLE_RADIUS;
+    
+    // 镜子碎片逃脱蒙版后，标记为 escapedMask（不再约束）
+    if (b.isMirror) {
+      if (inside) {
+        b.escapedMask = false; // 还在蒙版内，重置标记
+      } else if (!inside && b.escapedMask === false && b.wasInside) {
+        // 从蒙版内逃出
+        b.escapedMask = true;
+      }
+      if (b.escapedMask === undefined) b.escapedMask = false; // 初始化
+    }
     
     // snap logic: after staying inside for SNAP_HOLD_FRAMES, start moving outside canvas
     if (b.suit && !b.locked) {
@@ -620,8 +632,8 @@ function computeFrameInnerBounds() {
   }
   if (maxX >= minX && maxY >= minY) {
     // 分别调整水平和竖直的内缩距离
-    const padHorizontal = 210; // 左右内缩距离
-    const padVertical = 110;   // 上下内缩距离
+    const padHorizontal = 200; // 左右内缩距离
+    const padVertical = 0;   // 上下内缩距离
     minX = constrain(minX + padHorizontal, 0, width);
     minY = constrain(minY + padVertical, 0, height);
     maxX = constrain(maxX - padHorizontal, 0, width);
