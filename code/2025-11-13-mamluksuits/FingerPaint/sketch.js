@@ -1,5 +1,5 @@
 let balls = [];
-let maxBalls = 14;  // 4 suits + 16 mirror pieces
+let maxBalls = 8;  // 4 suits + 16 mirror pieces
 let lastTouchTime = 0;
 let touchCooldown = 300; // ms per-ball cooldown
 
@@ -25,11 +25,20 @@ const SUIT_SCALE = 1.8;
 const MIRROR_SCALE = 2.2;
 const MIRROR_ALPHA = 180;
 const EDGE_MARGIN = 20; // minimum distance from any image edge to canvas border
+// 花色垂直带状范围（相对于镜框内窗高度的比例）
+const SUIT_Y_BAND_TOP = 0.05;     // 扩大带宽：更靠近顶部
+const SUIT_Y_BAND_BOTTOM = 0.85;  // 扩大带宽：更靠近底部
+const SUIT_Y_GAP = 90;            // 花色之间的最小“垂直间距”（像素）
 // snap settings
 const SNAP_HOLD_FRAMES = 30;   // how many consecutive frames inside mask before snapping
 const SNAP_LERP = 0.15;        // how fast the suit moves to the target
 const TARGET_PAD = 80;         // padding from edges for slot positions
 let suitTargets = {};          // computed target positions for each suit
+
+// 花色分布参数
+const SUIT_CENTER_Y_OFFSET = -0.02; // 负值上移约 22% 内窗高度
+const SUIT_SPREAD_X = 0.30;         // 水平分布半径（越大越分散）
+const SUIT_SPREAD_Y = 1.92;         // 垂直分布半径（扩大上下范围）
 
 function preload() {
   // put diamond.png, club.png, heart.png, spade.png in an "assets" folder next to this sketch
@@ -142,10 +151,31 @@ function setup() {
     const maxX = ib.x + ib.w - renderRadius - EDGE_MARGIN;
     const minY = ib.y + renderRadius + EDGE_MARGIN;
     const maxY = ib.y + ib.h - renderRadius - EDGE_MARGIN;
+    // 花色在可用带状区域内生成
+    const bandMinY = ib.y + ib.h * SUIT_Y_BAND_TOP  + renderRadius + EDGE_MARGIN;
+    const bandMaxY = ib.y + ib.h * SUIT_Y_BAND_BOTTOM - renderRadius - EDGE_MARGIN;
+
+    // 采样位置：花色增加“垂直间距”约束
+    let initX = random(minX, maxX);
+    let initY = suit ? random(bandMinY, bandMaxY) : random(minY, maxY);
+    if (suit) {
+      let placed = false;
+      for (let t = 0; t < 60; t++) {
+        const tx = random(minX, maxX);
+        const ty = random(bandMinY, bandMaxY);
+        let ok = true;
+        for (const o of balls) {
+          if (!o.suit) continue;
+          if (abs(ty - o.y) < SUIT_Y_GAP) { ok = false; break; } // 垂直最小间距
+        }
+        if (ok) { initX = tx; initY = ty; placed = true; break; }
+      }
+      if (!placed) { initX = random(minX, maxX); initY = random(bandMinY, bandMaxY); }
+    }
 
     balls.push({
-      x: random(minX, maxX),
-      y: random(minY, maxY),
+      x: initX,
+      y: initY,
       baseRadius: baseR,
       radius: 0,
       color: color(random(255), 200, 200),
@@ -640,43 +670,49 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
       const maxX = ib.x + ib.w - r - EDGE_MARGIN;
       const minY = ib.y + r + EDGE_MARGIN;
       const maxY = ib.y + ib.h - r - EDGE_MARGIN;
-      
-      // 对花色使用更严格的分散策略
+      const bandMinY = ib.y + ib.h * SUIT_Y_BAND_TOP  + r + EDGE_MARGIN;
+      const bandMaxY = ib.y + ib.h * SUIT_Y_BAND_BOTTOM - r - EDGE_MARGIN;
+
       if (b.suit) {
-        // suits：尝试找到离其他球最远的位置
-        let bestPos = { x: random(minX, maxX), y: random(minY, maxY) };
+        // 花色：在更宽垂直带内采样，并强制最小“垂直间距”
+        let bestPos = { x: random(minX, maxX), y: random(bandMinY, bandMaxY) };
+        let bestScore = -Infinity;
+        for (let tries = 0; tries < 60; tries++) {
+          const testX = random(minX, maxX);
+          const testY = random(bandMinY, bandMaxY);
+          // 垂直间距约束（仅对花色）
+          let ok = true;
+          for (let j = 0; j < i; j++) {
+            const o = balls[j];
+            if (!o.suit) continue;
+            if (abs(testY - o.y) < SUIT_Y_GAP) { ok = false; break; }
+          }
+          if (!ok) continue;
+          // 评分：离所有元素越远越好
+          let minDistToOthers = Infinity;
+          for (let j = 0; j < i; j++) {
+            const d = dist(testX, testY, balls[j].x, balls[j].y);
+            minDistToOthers = min(minDistToOthers, d);
+          }
+          if (minDistToOthers > bestScore) {
+            bestScore = minDistToOthers;
+            bestPos = { x: testX, y: testY };
+          }
+        }
+        b.x = bestPos.x;
+        b.y = bestPos.y;
+      } else {
+        // 碎片：以镜框内窗中心为核心，均匀分布
+        const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
+        const centerX = ib.x + ib.w / 2;
+        const centerY = ib.y + ib.h / 2;
+        const spreadRadiusX = ib.w * 0.42; // 水平半径：内窗宽的 42%，增大以分散
+        const spreadRadiusY = ib.h * 0.42; // 竖直半径：内窗高的 42%，增大以分散
+         
+        let bestPos = null;
         let bestMinDist = -Infinity;
-        const minDistanceThreshold = 150; // 减小距离阈值，让花色更容易分散
          
-        for (let tries = 0; tries < 30; tries++) { // 增加尝试次数
-           const testX = random(minX, maxX);
-           const testY = random(minY, maxY);
-           let minDistToOthers = Infinity;
-           
-           for (let j = 0; j < i; j++) {
-             const d = dist(testX, testY, balls[j].x, balls[j].y);
-             minDistToOthers = min(minDistToOthers, d);
-           }
-           
-           if (minDistToOthers > bestMinDist) {
-             bestMinDist = minDistToOthers;
-             bestPos = { x: testX, y: testY };
-           }
-         }
-         b.x = bestPos.x;
-         b.y = bestPos.y;
-       } else {
-         // 碎片：以镜框内窗中心为核心，均匀分布
-         const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
-         const centerX = ib.x + ib.w / 2;
-         const centerY = ib.y + ib.h / 2;
-         const spreadRadiusX = ib.w * 0.42; // 水平半径：内窗宽的 42%，增大以分散
-         const spreadRadiusY = ib.h * 0.42; // 竖直半径：内窗高的 42%，增大以分散
-         
-         let bestPos = null;
-         let bestMinDist = -Infinity;
-         
-         for (let tries = 0; tries < 15; tries++) { // 增加尝试次数
+        for (let tries = 0; tries < 15; tries++) { // 增加尝试次数
            // 改为在椭圆内均匀随机（使用 sqrt 校正距离分布）
            const angle = random(TWO_PI);
            const distance = sqrt(random(1)); // sqrt 使分布均匀（不会偏向中心）
@@ -710,7 +746,8 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
         attempts++;
       }
     }
-}
+  }
+
 let transferred = false; // 新增：防止重复跳转
 
 // 逃脱碎片的距离控制
