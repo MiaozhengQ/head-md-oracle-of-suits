@@ -11,6 +11,10 @@ let armRightImage; // 新增：右臂图片
 let handLeftImage;  // 新增：左手图片
 let handRightImage; // 新增：右手图片
 
+// 左手位置偏移（可调）
+const LEFT_HAND_FWD = 120;   // 沿手方向前后移动（增大更靠前/更远离手腕）
+const LEFT_HAND_OUT = 30;  // 垂直手方向内外移动（负值向内，正值向外）
+
 let armLengths = {
   left: null,
   right: null
@@ -373,7 +377,11 @@ function drawAvatar(landmarks, gesture) {
   // 手：放在头之后绘制，确保在头前面
   if (lElbow && lWrist && handLeftImage) {
     drawHandImage(handLeftImage, lElbow, lWrist, {
-      side: 'left', bodyScale: bodyScaleForArms, handScale: 1.0
+      side: 'left',
+      bodyScale: bodyScaleForArms,
+      handScale: 1.0,
+      handFwd: LEFT_HAND_FWD,   // 应用左手前后偏移
+      handOut: LEFT_HAND_OUT    // 应用左手内外偏移
     });
   }
   if (rElbow && rWrist && handRightImage) {
@@ -456,7 +464,7 @@ function drawAvatar(landmarks, gesture) {
     pop();
   }
 
-  // 手部图像绘制（肘->腕 定向，中心在腕部），无额外偏移/旋转校正
+  // 手部图像绘制（肘->腕 定向，中心在腕部）
   function drawHandImage(img, elbow, wrist, opts = {}) {
     if (!img || !wrist) return;
     const side = opts.side || 'left';
@@ -471,14 +479,13 @@ function drawAvatar(landmarks, gesture) {
     const imgW = imgH * aspect;
 
     // 本地偏移：FWD 沿手方向（+x），OUT 垂直手方向（+y）
-    const FWD = opts.handFwd != null ? opts.handFwd : 110;         // 往前/往后（沿手方向）
-    const OUT = (opts.handOut != null ? opts.handOut :-18)       // 向外（垂直手方向）
-              * (side === 'left' ? 1 : -1);                      // 右手外侧相反
+    const FWD = opts.handFwd != null ? opts.handFwd : 110;
+    const OUT = (opts.handOut != null ? opts.handOut : -18) * (side === 'left' ? 1 : -1);
 
     push();
     translate(wrist.x, wrist.y);  // 以腕为旋转中心
     rotate(ang);                  // 对齐前臂方向
-    translate(FWD, OUT);         // 沿自身旋转后的坐标系外移
+    translate(FWD, OUT);          // 应用位置偏移
     imageMode(CENTER);
     image(img, 0, 0, imgW, imgH);
     pop();

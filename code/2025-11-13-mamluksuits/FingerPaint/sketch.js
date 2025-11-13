@@ -41,7 +41,7 @@ let suitTargets = {};          // computed target positions for each suit
 
 // 花色分布参数
 const SUIT_CENTER_Y_OFFSET = -0.02; // 负值上移约 22% 内窗高度
-const SUIT_SPREAD_X = 0.30;         // 水平分布半径（越大越分散）
+const SUIT_SPREAD_X = 0.10;         // 水平分布半径（越大越分散）
 const SUIT_SPREAD_Y = 1.92;         // 垂直分布半径（扩大上下范围）
 
 function preload() {
