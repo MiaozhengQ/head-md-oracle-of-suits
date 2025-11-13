@@ -75,8 +75,9 @@ function initSuitTargets() {
 }
 
 function setup() {
-  cnv = createCanvas(450, 580);
+  cnv = createCanvas(windowWidth, windowHeight);
   centerCanvas();
+  pixelDensity(1);
   setupHands();
   setupVideo();
   colorMode(HSB, 255);
@@ -87,23 +88,21 @@ function setup() {
   maskColor = color(150, 100, 200, 120); // tweak these values
 
   circleG = createGraphics(width, height);
+  circleG.pixelDensity(1);
   mainG = createGraphics(width, height);
   mainG.pixelDensity(1);
   mainG.colorMode(HSB, 255);
 
-  // 基于 frame.png 生成“内窗为白”的遮罩（一次性）
+  // 生成"内窗为白"的遮罩（基于 frame.png，使用 copy 保证尺寸与像素密度一致）
   if (frameImg && frameImg.width > 0) {
-    const tmp = createGraphics(width, height);
-    tmp.clear();
-    // 拉伸到画布大小（确保尺寸匹配）
-    tmp.image(frameImg, 0, 0, width, height);
-    tmp.loadPixels();
+    const scaledFrame = createImage(width, height);
+    scaledFrame.copy(frameImg, 0, 0, frameImg.width, frameImg.height, 0, 0, width, height);
+    scaledFrame.loadPixels();
     frameMaskImg = createImage(width, height);
     frameMaskImg.loadPixels();
-    // 反转 alpha：mask = 255 - alpha(frame)
-    for (let i = 0; i < tmp.pixels.length; i += 4) {
-      const a = tmp.pixels[i + 3];
-      const m = 255 - a; // 中心透明(0) -> 255(保留)，边框不透明(255) -> 0(裁切)
+    for (let i = 0; i < scaledFrame.pixels.length; i += 4) {
+      const a = scaledFrame.pixels[i + 3];
+      const m = 255 - a;
       frameMaskImg.pixels[i] = m;
       frameMaskImg.pixels[i + 1] = m;
       frameMaskImg.pixels[i + 2] = m;
@@ -162,8 +161,35 @@ function setup() {
 }
 
 function windowResized() {
-  // reposition canvas to stay centered on window resize
-  centerCanvas();
+  // 重新调整画布大小，适应窗口
+  resizeCanvas(windowWidth, windowHeight);
+  
+  // 重新生成 offscreen graphics
+  circleG = createGraphics(width, height);
+  circleG.pixelDensity(1);
+  mainG = createGraphics(width, height);
+  mainG.pixelDensity(1);
+  mainG.colorMode(HSB, 255);
+  
+  // 重新生成 frame mask
+  if (frameImg && frameImg.width > 0) {
+    const scaledFrame = createImage(width, height);
+    scaledFrame.copy(frameImg, 0, 0, frameImg.width, frameImg.height, 0, 0, width, height);
+    scaledFrame.loadPixels();
+    frameMaskImg = createImage(width, height);
+    frameMaskImg.loadPixels();
+    for (let i = 0; i < scaledFrame.pixels.length; i += 4) {
+      const a = scaledFrame.pixels[i + 3];
+      const m = 255 - a;
+      frameMaskImg.pixels[i] = m;
+      frameMaskImg.pixels[i + 1] = m;
+      frameMaskImg.pixels[i + 2] = m;
+      frameMaskImg.pixels[i + 3] = 255;
+    }
+    frameMaskImg.updatePixels();
+    frameMaskReady = true;
+  }
+  
   initSuitTargets();
   // refresh target positions for suits
   for (const b of balls) {
@@ -178,10 +204,8 @@ function windowResized() {
 // center the canvas element on the page
 function centerCanvas() {
   if (!cnv) return;
-  // place canvas so its center matches the window center
-  const x = floor((windowWidth - width) / 2);
-  const y = floor((windowHeight - height) / 2);
-  cnv.position(x, y);
+  // 画布全屏时无需再定位
+  cnv.position(0, 0);
 }
  
 function draw() {
@@ -303,8 +327,10 @@ function draw() {
     mainG.image(circleG, 0, 0);
   }
 
-  // 方式改为：先用反转 mask 裁剪 mainG，再叠加 frame 装饰
-  let composed = mainG.get(); // p5.Image
+  // 先清空主画布，避免上帧残留在蒙版外
+  clear();
+  // 先用反转 mask 裁剪 mainG，再叠加 frame 装饰
+  let composed = mainG.get(); // p5.Image 的拷贝
   if (frameMaskReady && frameMaskImg) {
     composed.mask(frameMaskImg); // 白=保留，黑=裁切
   }
