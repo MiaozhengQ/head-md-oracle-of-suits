@@ -24,7 +24,7 @@ let maskColor; // color tint inside the circular mask
 const SUIT_SCALE = 1.8;
 const MIRROR_SCALE = 2.2;
 const MIRROR_ALPHA = 180;
-const EDGE_MARGIN = 50; // 增大：离镜框边缘更远
+const EDGE_MARGIN = 20; // minimum distance from any image edge to canvas border
 // snap settings
 const SNAP_HOLD_FRAMES = 30;   // how many consecutive frames inside mask before snapping
 const SNAP_LERP = 0.15;        // how fast the suit moves to the target
@@ -156,7 +156,6 @@ function setup() {
       insideCount: 0,
       snap: false,
       locked: false,
-      escapedMask: false, // 新增：碎片是否逃出食指蒙版
       targetX: suit ? suitTargets[suit].x : undefined,
       targetY: suit ? suitTargets[suit].y : undefined
     });
@@ -270,7 +269,6 @@ function draw() {
            if (b) {
              b.x = ix + dragOffsetX;
              b.y = iy + dragOffsetY;
-            clampBallInside(b); // 拖拽时即时夹紧
  
              const releaseByDepth = dz < (DEPTH_THRESHOLD * RELEASE_DEPTH_FACTOR);
              const d2 = dist(ix, iy, b.x, b.y);
@@ -294,10 +292,10 @@ function draw() {
   }
 
   // check if any suit is inside the mask
-  let suitInsideMask = false; // 仅检查 suits，不检查 mirrors
+  let suitInsideMask = false;
   if (indexPos) {
     for (const b of balls) {
-      if (b.suit && !b.isMirror && dist(b.x, b.y, indexPos.x, indexPos.y) <= INDEX_CIRCLE_RADIUS) {
+      if (b.suit && dist(b.x, b.y, indexPos.x, indexPos.y) <= INDEX_CIRCLE_RADIUS) {
         suitInsideMask = true;
         break;
       }
@@ -380,18 +378,8 @@ function clampBallInside(b) {
   b.y = constrain(b.y, ib.y + r + EDGE_MARGIN, ib.y + ib.h - (r + EDGE_MARGIN));
 }
 
-// 仅用于绘制时对抖动后的位置做夹紧（不改动 b.x/b.y）
-function clampPointToInnerBounds(x, y, r) {
-  const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
-  const cx = constrain(x, ib.x + r + EDGE_MARGIN, ib.x + ib.w - (r + EDGE_MARGIN));
-  const cy = constrain(y, ib.y + r + EDGE_MARGIN, ib.y + ib.h - (r + EDGE_MARGIN));
-  return { x: cx, y: cy };
-}
-
 function keepInsideAllBalls() {
-  for (const b of balls) {
-    if (!b.snap && !b.locked) clampBallInside(b); // 正在外移/已锁定的跳过
-  }
+  for (const b of balls) clampBallInside(b);
 }
 
 // update index finger position (center of moving circle)
@@ -431,37 +419,26 @@ function drawBallsToGraphics(g) {
   const now = millis();
   
   for (let b of balls) {
+    // skip rendering locked suits (they've exited the canvas)
     if (b.locked) continue;
     
     g.fill(b.color);
     const t = frameCount;
     
+    // initialize pulse state per ball
     if (b.pulseStart == null) b.pulseStart = 0;
     if (b.wasInside == null) b.wasInside = false;
     
+    // only suits wiggle; mirrors stay static (unless locked, still allow small wiggle if you want)
     let rx = 0, ry = 0;
     if (b.suit) {
-      const wig = b.locked ? 0.3 : 1;
+      const wig = b.locked ? 0.3 : 1; // reduce wiggle after locked, optional
       rx = (noise(b.noiseX + t * b.wiggleSpeed)) * 20 * b.wiggle * wig;
       ry = (noise(b.noiseY + t * b.wiggleSpeed)) * 20 * b.wiggle * wig;
     }
     
-    // 计算绘制半径与抖动后的绘制位置，并夹紧到镜框内窗
-    const renderR = currentRenderRadius(b);
-    const drawPos = clampPointToInnerBounds(b.x + rx, b.y + ry, renderR);
-    
+    // check if suit is inside the circle mask
     const inside = indexPos && dist(b.x, b.y, indexPos.x, indexPos.y) <= INDEX_CIRCLE_RADIUS;
-    
-    // 镜子碎片逃脱蒙版后，标记为 escapedMask（不再约束）
-    if (b.isMirror) {
-      if (inside) {
-        b.escapedMask = false; // 还在蒙版内，重置标记
-      } else if (!inside && b.escapedMask === false && b.wasInside) {
-        // 从蒙版内逃出
-        b.escapedMask = true;
-      }
-      if (b.escapedMask === undefined) b.escapedMask = false; // 初始化
-    }
     
     // snap logic: after staying inside for SNAP_HOLD_FRAMES, start moving outside canvas
     if (b.suit && !b.locked) {
@@ -469,12 +446,11 @@ function drawBallsToGraphics(g) {
         b.insideCount = (b.insideCount || 0) + 1;
         if (!b.snap && b.insideCount >= SNAP_HOLD_FRAMES) {
           b.snap = true;
-          // 不再设置外部目标，改为：让 suit 逐帧靠近圆心边缘，然后锁定
-          // （这样就不会向画布外移动）
-          const angle = atan2(indexPos.y - b.y, indexPos.x - b.x);
-          const snapRadius = INDEX_CIRCLE_RADIUS + 20; // 圆心边缘稍外一点
-          b.targetX = indexPos.x + cos(angle) * snapRadius;
-          b.targetY = indexPos.y + sin(angle) * snapRadius;
+          // set random exit direction (outside canvas)
+          const angle = random(TWO_PI);
+          const distance = 500; // how far outside to move
+          b.targetX = indexPos.x + cos(angle) * distance;
+          b.targetY = indexPos.y + sin(angle) * distance;
         }
       } else {
         b.insideCount = 0;
@@ -482,12 +458,10 @@ function drawBallsToGraphics(g) {
       if (b.snap && b.targetX != null && b.targetY != null) {
         b.x = lerp(b.x, b.targetX, SNAP_LERP);
         b.y = lerp(b.y, b.targetY, SNAP_LERP);
-        clampBallInside(b); // snap 时也夹紧
         // lock when very close; also disable interaction
         if (dist(b.x, b.y, b.targetX, b.targetY) < 5) {
           b.x = b.targetX;
           b.y = b.targetY;
-          clampBallInside(b); // 锁定前最后夹紧一次
           b.locked = true;
           b.active = false;
           b.snap = false;
@@ -533,12 +507,13 @@ function drawBallsToGraphics(g) {
         g.tint(255, imgAlpha);
         const drawW = (b.radius * 2) * pulseMul * SUIT_SCALE * (img.width / max(img.height, 1));
         const drawH = (b.radius * 2) * pulseMul * SUIT_SCALE;
-        g.image(img, drawPos.x, drawPos.y, drawW, drawH);
+        g.image(img, b.x + rx, b.y + ry, drawW, drawH);
         g.pop();
         continue;
       }
     }
     
+    // draw broken mirror image instead of circle
     if (b.isMirror && b.mirrorIndex >= 0 && mirrorImgs[b.mirrorIndex]) {
       g.push();
       g.imageMode(CENTER);
@@ -546,11 +521,11 @@ function drawBallsToGraphics(g) {
       g.tint(255, MIRROR_ALPHA);
       const drawH = b.radius * 5 * MIRROR_SCALE;
       const drawW = drawH * (img.width / max(img.height, 1));
-      g.image(img, drawPos.x, drawPos.y, drawW, drawH);
+      g.image(img, b.x, b.y, drawW, drawH);
       g.noTint();
       g.pop();
     } else {
-      g.circle(drawPos.x, drawPos.y, b.radius * 2);
+      g.circle(b.x, b.y, b.radius * 2);
     }
   }
 }
@@ -592,18 +567,12 @@ function enforceMaxOverlap(maxFrac = 0.10, attemptsPerBall = 120) {
         }
       }
       if (!tooMuch) break;
-      // reposition 在镜框内窗范围内
-      const r = currentRenderRadius(b);
-      const ib = frameInnerBounds.w > 0 ? frameInnerBounds : { x: 0, y: 0, w: width, h: height };
-      const minX = ib.x + r + EDGE_MARGIN;
-      const maxX = ib.x + ib.w - r - EDGE_MARGIN;
-      const minY = ib.y + r + EDGE_MARGIN;
-      const maxY = ib.y + ib.h - r - EDGE_MARGIN;
-      b.x = random(minX, maxX);
-      b.y = random(minY, maxY);
-       attempts++;
-     }
-   }
+      // reposition
+      b.x = random(width * 0.1, width * 0.9);
+      b.y = random(height * 0.1, height * 0.9);
+      attempts++;
+    }
+  }
 }
 
 let transferred = false; // 新增：防止重复跳转
@@ -622,7 +591,7 @@ function computeFrameInnerBounds() {
     for (let x = 0; x < width; x += step) {
       const idx = 4 * (y * width + x);
       const a = frameMaskImg.pixels[idx + 3]; // alpha
-      if (a > 6) { // 在保留区域内
+      if (a > 10) { // 在保留区域内
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
         if (y < minY) minY = y;
@@ -631,13 +600,12 @@ function computeFrameInnerBounds() {
     }
   }
   if (maxX >= minX && maxY >= minY) {
-    // 分别调整水平和竖直的内缩距离
-    const padHorizontal = 200; // 左右内缩距离
-    const padVertical = 0;   // 上下内缩距离
-    minX = constrain(minX + padHorizontal, 0, width);
-    minY = constrain(minY + padVertical, 0, height);
-    maxX = constrain(maxX - padHorizontal, 0, width);
-    maxY = constrain(maxY - padVertical, 0, height);
+    // 扩一点点保证内缩不贴边
+    const pad = 6;
+    minX = constrain(minX + pad, 0, width);
+    minY = constrain(minY + pad, 0, height);
+    maxX = constrain(maxX - pad, 0, width);
+    maxY = constrain(maxY - pad, 0, height);
     frameInnerBounds = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   } else {
     frameInnerBounds = { x: 0, y: 0, w: width, h: height };
